@@ -1,0 +1,9 @@
+image_search
+main.ipynb
+main.py
+search_config.json
+glimpse-front/node_modules
+__pycache__
+desktopvenv
+backend/data/cache_dir
+backend/data/artifacts
