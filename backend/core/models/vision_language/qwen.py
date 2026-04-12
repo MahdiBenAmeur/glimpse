@@ -7,7 +7,7 @@ import torch
 from PIL import Image
 from transformers import AutoModel, AutoProcessor
 
-from backend.core.models.embedders.base import BaseEmbeddingModel
+from backend.core.models.vision_language.base import BaseEmbeddingModel
 
 
 class QwenEmbeddingModel(BaseEmbeddingModel):

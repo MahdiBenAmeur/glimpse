@@ -5,16 +5,16 @@ from typing import Sequence
 
 import torch
 from PIL import Image
-from transformers import AutoProcessor, CLIPModel
+from transformers import AutoModel, AutoProcessor
 
-from backend.core.models.embedders.base import BaseEmbeddingModel
+from backend.core.models.vision_language.base import BaseEmbeddingModel
 from backend.config import device
 
 
-class ClipEmbeddingModel(BaseEmbeddingModel):
-    CKPT = "openai/clip-vit-base-patch32"
+class SiglipEmbeddingModel(BaseEmbeddingModel):
+    CKPT = "google/siglip2-base-patch16-224"
     processor_class = AutoProcessor
-    model_class = CLIPModel
+    model_class = AutoModel
 
     def embed_images(self, images: Sequence[str | Path | Image.Image]) -> torch.Tensor:
         self._validate_images(images)
@@ -35,7 +35,7 @@ class ClipEmbeddingModel(BaseEmbeddingModel):
         processor, model = self.load_model()
         inputs = processor(
             text=list(texts),
-            padding=True,
+            padding="max_length",
             truncation=True,
             return_tensors="pt",
         )
