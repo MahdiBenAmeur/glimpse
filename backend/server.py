@@ -7,6 +7,7 @@ from backend.api.collections import router as collections_router
 from backend.api.folders import router as folders_router
 from backend.api.images import router as images_router
 from backend.api.people import router as people_router
+from backend.api.saved_searches import router as saved_searches_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -35,6 +36,7 @@ app.include_router(collections_router, prefix="/api")
 app.include_router(folders_router, prefix="/api")
 app.include_router(images_router, prefix="/api")
 app.include_router(people_router, prefix="/api")
+app.include_router(saved_searches_router, prefix="/api")
 
 @app.get("/")
 def read_root():

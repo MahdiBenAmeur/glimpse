@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, type ReactNode } from "react";
-import { MOCK_MODELS, MOCK_FOLDERS, MOCK_PEOPLE, MOCK_IMAGES, MOCK_COLLECTIONS, MOCK_SAVED_SEARCHES, type ModelInfo, type FolderInfo, type PersonInfo, type ImageResult, type CollectionInfo, type SavedSearch } from "@/data/mockData";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import { MOCK_MODELS, type ModelInfo, type FolderInfo, type PersonInfo, type ImageResult, type CollectionInfo, type SavedSearch } from "@/data/mockData";
 
 type IndexingPhase = "idle" | "scanning" | "embeddings" | "faces" | "thumbnails" | "writing" | "complete";
 
@@ -18,26 +20,31 @@ interface AppState {
   onboardingStep: number;
   models: ModelInfo[];
   activeModel: ModelInfo | null;
-  folders: FolderInfo[];
-  people: PersonInfo[];
-  images: ImageResult[];
-  collections: CollectionInfo[];
-  savedSearches: SavedSearch[];
   indexingStatus: IndexingStatus;
   lastIndexedTime: string | null;
   totalIndexedImages: number;
 }
 
 interface AppContextType extends AppState {
+  // Remote Data
+  folders: FolderInfo[];
+  people: PersonInfo[];
+  images: ImageResult[];
+  collections: CollectionInfo[];
+  savedSearches: SavedSearch[];
+  
+  // UI & System State
   setOnboardingStep: (step: number) => void;
   completeOnboarding: () => void;
   downloadModel: (id: string) => void;
   setActiveModel: (id: string) => void;
   removeModel: (id: string) => void;
-  addFolder: (path: string) => void;
-  removeFolder: (id: string) => void;
   startIndexing: () => void;
   runInBackground: () => void;
+
+  // Remote Mutations
+  addFolder: (path: string) => void;
+  removeFolder: (id: string) => void;
   toggleFavorite: (imageId: string) => void;
   renamePerson: (personId: string, name: string) => void;
   createCollection: (name: string, description?: string) => void;
@@ -49,15 +56,36 @@ interface AppContextType extends AppState {
 const AppContext = createContext<AppContextType | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
+
+  // 1. Remote Data Fetching (Live from Backend)
+  const { data: images = [] } = useQuery({ queryKey: ["images"], queryFn: () => api.images.getAll() as Promise<ImageResult[]> });
+  const { data: folders = [] } = useQuery({ queryKey: ["folders"], queryFn: () => api.folders.getAll() as Promise<FolderInfo[]> });
+  const { data: collections = [] } = useQuery({ queryKey: ["collections"], queryFn: () => api.collections.getAll() as Promise<CollectionInfo[]> });
+  const { data: people = [] } = useQuery({ queryKey: ["people"], queryFn: () => api.people.getAll() as Promise<PersonInfo[]> });
+  const { data: savedSearches = [] } = useQuery({ queryKey: ["savedSearches"], queryFn: () => api.savedSearches.getAll() as Promise<SavedSearch[]> });
+
+  // 2. Mutations
+  const addFolderMutation = useMutation({ mutationFn: api.folders.add, onSuccess: () => queryClient.invalidateQueries({ queryKey: ["folders"] }) });
+  const removeFolderMutation = useMutation({ mutationFn: api.folders.delete, onSuccess: () => queryClient.invalidateQueries({ queryKey: ["folders"] }) });
+  
+  const createCollectionMutation = useMutation({ mutationFn: ({ name, desc }: { name: string, desc?: string }) => api.collections.create(name, desc), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["collections"] }) });
+  const deleteCollectionMutation = useMutation({ mutationFn: api.collections.delete, onSuccess: () => queryClient.invalidateQueries({ queryKey: ["collections"] }) });
+
+  const renamePersonMutation = useMutation({ mutationFn: ({ id, name }: { id: string, name: string }) => api.people.rename(id, name), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["people"] }) });
+  const toggleFavoriteMutation = useMutation({ mutationFn: ({ id, isFav }: { id: string, isFav: boolean }) => api.images.toggleFavorite(id, isFav), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["images"] }) });
+
+  const saveSearchMutation = useMutation({ mutationFn: (data: { name: string, query: string, filters: Record<string, unknown> }) => api.savedSearches.create(data), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["savedSearches"] }) });
+  const deleteSearchMutation = useMutation({ mutationFn: api.savedSearches.delete, onSuccess: () => queryClient.invalidateQueries({ queryKey: ["savedSearches"] }) });
+
+
+  // 3. Local UI State (Onboarding, Options, Indexing Status)
   const [state, setState] = useState<AppState>(() => {
     const saved = localStorage.getItem("glimpse-one-state");
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        return { ...getDefaultState(), ...parsed, models: MOCK_MODELS.map(m => {
-          const savedModel = parsed.models?.find((sm: ModelInfo) => sm.id === m.id);
-          return savedModel || m;
-        })};
+        return { ...getDefaultState(), ...parsed };
       } catch { /* ignore */ }
     }
     return getDefaultState();
@@ -69,11 +97,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       onboardingStep: 0,
       models: MOCK_MODELS,
       activeModel: null,
-      folders: [],
-      people: [],
-      images: [],
-      collections: [],
-      savedSearches: [],
       indexingStatus: { phase: "idle", progress: 0, total: 0, processed: 0, facesDetected: 0, skipped: 0 },
       lastIndexedTime: null,
       totalIndexedImages: 0,
@@ -99,185 +122,62 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, [persist]);
 
-  const downloadModel = useCallback((id: string) => {
-    setState(prev => {
-      const models = prev.models.map(m => m.id === id ? { ...m, status: "downloading" as const, downloadProgress: 0 } : m);
-      const next = { ...prev, models };
-      persist(next);
-      return next;
-    });
-    // Simulate download
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += Math.random() * 15 + 5;
-      if (progress >= 100) {
-        progress = 100;
-        clearInterval(interval);
-        setState(prev => {
-          const models = prev.models.map(m => m.id === id ? { ...m, status: "installed" as const, downloadProgress: 100 } : m);
-          const next = { ...prev, models };
-          persist(next);
-          return next;
-        });
-      } else {
-        setState(prev => {
-          const models = prev.models.map(m => m.id === id ? { ...m, downloadProgress: Math.round(progress) } : m);
-          return { ...prev, models };
-        });
-      }
-    }, 500);
-  }, [persist]);
 
-  const setActiveModel = useCallback((id: string) => {
-    setState(prev => {
-      const models = prev.models.map(m => ({ ...m, status: (m.id === id ? "active" : m.status === "active" ? "installed" : m.status) as ModelInfo["status"] }));
-      const activeModel = models.find(m => m.id === id) || null;
-      const next = { ...prev, models, activeModel };
-      persist(next);
-      return next;
-    });
-  }, [persist]);
+  // 4. Implement Local Modifiers
 
-  const removeModel = useCallback((id: string) => {
-    setState(prev => {
-      const models = prev.models.map(m => m.id === id ? { ...m, status: "not_installed" as const, downloadProgress: undefined } : m);
-      const activeModel = prev.activeModel?.id === id ? null : prev.activeModel;
-      const next = { ...prev, models, activeModel };
-      persist(next);
-      return next;
-    });
-  }, [persist]);
+  const setOnboardingStep = (step: number) => update({ onboardingStep: step });
+  const completeOnboarding = () => update({ isFirstLaunch: false, onboardingStep: 3 });
+  const runInBackground = () => update({ isFirstLaunch: false, onboardingStep: 3 });
 
-  const addFolder = useCallback((path: string) => {
-    const newFolder: FolderInfo = {
-      id: `f-${Date.now()}`,
-      path,
-      imageCount: 0,
-      lastScanTime: "",
-      status: "ready",
-      includeSubfolders: true,
-    };
-    setState(prev => ({ ...prev, folders: [...prev.folders, newFolder] }));
-  }, []);
-
-  const removeFolder = useCallback((id: string) => {
-    setState(prev => ({ ...prev, folders: prev.folders.filter(f => f.id !== id) }));
-  }, []);
-
-  const startIndexing = useCallback(() => {
-    update({
-      indexingStatus: { phase: "scanning", progress: 0, total: 4506, processed: 0, facesDetected: 0, skipped: 0, currentFile: "Scanning folders..." },
-    });
-    const phases: IndexingPhase[] = ["scanning", "embeddings", "faces", "thumbnails", "writing", "complete"];
-    let phaseIdx = 0;
-    let processed = 0;
-    const total = 4506;
-    const interval = setInterval(() => {
-      processed += Math.floor(Math.random() * 200 + 100);
-      if (processed >= total * ((phaseIdx + 1) / (phases.length - 1))) {
-        phaseIdx++;
-        if (phaseIdx >= phases.length - 1) {
+  const startIndexing = () => {
+      // Mocked indexing since backend system APIs don't exist yet
+      update({ indexingStatus: { phase: "scanning", progress: 0, total: 100, processed: 0, facesDetected: 0, skipped: 0, currentFile: "Scanning folders..." } });
+      let processed = 0;
+      const interval = setInterval(() => {
+        processed += 10;
+        if (processed >= 100) {
           clearInterval(interval);
-          update({
-            indexingStatus: { phase: "complete", progress: 100, total, processed: total, facesDetected: 847, skipped: 23, currentFile: undefined },
-            images: MOCK_IMAGES,
-            people: MOCK_PEOPLE,
-            folders: MOCK_FOLDERS,
-            collections: MOCK_COLLECTIONS,
-            savedSearches: MOCK_SAVED_SEARCHES,
-            lastIndexedTime: new Date().toISOString(),
-            totalIndexedImages: total,
-          });
-          return;
+          update({ indexingStatus: { phase: "complete", progress: 100, total: 100, processed: 100, facesDetected: 24, skipped: 0 } });
+          queryClient.invalidateQueries(); // Refresh all backend data at the end
+        } else {
+          setState(prev => ({ ...prev, indexingStatus: { phase: "scanning", progress: processed, total: 100, processed, facesDetected: 5, skipped: 0 } }));
         }
-      }
-      const progress = Math.min(100, Math.round((processed / total) * 100));
-      setState(prev => ({
-        ...prev,
-        indexingStatus: {
-          phase: phases[phaseIdx],
-          progress,
-          total,
-          processed: Math.min(processed, total),
-          facesDetected: Math.floor(processed * 0.19),
-          skipped: Math.floor(processed * 0.005),
-          currentFile: `IMG_${2000 + (processed % 500)}.jpg`,
-        },
-      }));
-    }, 300);
-  }, [update]);
+      }, 500);
+  };
 
-  const runInBackground = useCallback(() => {
-    update({ isFirstLaunch: false, onboardingStep: 3 });
-  }, [update]);
-
-  const completeOnboarding = useCallback(() => {
-    update({ isFirstLaunch: false, onboardingStep: 3 });
-  }, [update]);
-
-  const toggleFavorite = useCallback((imageId: string) => {
-    setState(prev => ({
-      ...prev,
-      images: prev.images.map(img => img.id === imageId ? { ...img, isFavorite: !img.isFavorite } : img),
-    }));
-  }, []);
-
-  const renamePerson = useCallback((personId: string, name: string) => {
-    setState(prev => ({
-      ...prev,
-      people: prev.people.map(p => p.id === personId ? { ...p, name } : p),
-    }));
-  }, []);
-
-  const createCollection = useCallback((name: string, description?: string) => {
-    const newCol: CollectionInfo = {
-      id: `c-${Date.now()}`,
-      name,
-      description,
-      imageCount: 0,
-      previewUrls: [],
-      modifiedDate: new Date().toISOString().split("T")[0],
-    };
-    setState(prev => ({ ...prev, collections: [...prev.collections, newCol] }));
-  }, []);
-
-  const deleteCollection = useCallback((id: string) => {
-    setState(prev => ({ ...prev, collections: prev.collections.filter(c => c.id !== id) }));
-  }, []);
-
-  const saveSearch = useCallback((name: string, query: string, filters: Record<string, unknown>) => {
-    const newSS: SavedSearch = {
-      id: `ss-${Date.now()}`,
-      name,
-      query,
-      filters,
-      lastUsed: new Date().toISOString().split("T")[0],
-    };
-    setState(prev => ({ ...prev, savedSearches: [...prev.savedSearches, newSS] }));
-  }, []);
-
-  const deleteSavedSearch = useCallback((id: string) => {
-    setState(prev => ({ ...prev, savedSearches: prev.savedSearches.filter(s => s.id !== id) }));
-  }, []);
+  const downloadModel = (id: string) => { /* Mocked */ };
+  const setActiveModel = (id: string) => { /* Mocked */ };
+  const removeModel = (id: string) => { /* Mocked */ };
 
   return (
     <AppContext.Provider value={{
       ...state,
-      setOnboardingStep: (step) => update({ onboardingStep: step }),
+      
+      // Live Data
+      folders,
+      people,
+      images,
+      collections,
+      savedSearches,
+      
+      // Interface Functions
+      setOnboardingStep,
       completeOnboarding,
       downloadModel,
       setActiveModel,
       removeModel,
-      addFolder,
-      removeFolder,
       startIndexing,
       runInBackground,
-      toggleFavorite,
-      renamePerson,
-      createCollection,
-      deleteCollection,
-      saveSearch,
-      deleteSavedSearch,
+      
+      // Backend Mutations
+      addFolder: (path) => addFolderMutation.mutate(path),
+      removeFolder: (id) => removeFolderMutation.mutate(id),
+      toggleFavorite: (id) => toggleFavoriteMutation.mutate({ id, isFav: !images.find(i => i.id === id)?.isFavorite }),
+      renamePerson: (id, name) => renamePersonMutation.mutate({ id, name }),
+      createCollection: (name, desc) => createCollectionMutation.mutate({ name, desc }),
+      deleteCollection: (id) => deleteCollectionMutation.mutate(id),
+      saveSearch: (name, query, filters) => saveSearchMutation.mutate({ name, query, filters }),
+      deleteSavedSearch: (id) => deleteSearchMutation.mutate(id),
     }}>
       {children}
     </AppContext.Provider>
