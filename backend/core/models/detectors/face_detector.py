@@ -1,19 +1,38 @@
+import json
 from pathlib import Path
 
 from huggingface_hub import hf_hub_download
 from PIL import Image
 from ultralytics import YOLO
 
-from backend.config import models_cache_dir, DETECTOR_MODEL
-
 import torch.nn.functional as F
-from PIL import Image
 from timm.data import create_transform, resolve_data_config
 import torch
-from backend.config import device, models_cache_dir , FACE_EMBEDDING_MODEL
-from backend.core.models.detectors.face_detector import crop_faces, detect_faces
 
+from backend.config import (
+    DETECTOR_MODEL,
+    FACE_EMBEDDING_MODEL,
+    FACE_MERGE_THRESHOLD,
+    FACE_VS_PATH,
+    PERSON_VS_PATH,
+    device,
+    models_cache_dir,
+)
+import numpy as np
 import timm
+import faiss
+from backend.utils.vector_store_utils import load_or_init_vector_store  , consume_next_id
+
+face_emb_dim = 512
+face_vs = None
+face_meta_data = None
+person_vs = None
+person_meta_data = None
+
+
+
+
+
 
 def load_face_embedding_model():
     global FACE_EMBEDDING_MODEL
@@ -73,9 +92,103 @@ def embed_faces(path_2_crops: dict[Path, list[Image.Image]], batch_size: int = 3
         if embeddings:
             path_2_embeddings[image_path] = torch.stack(embeddings)
         else:
-            path_2_embeddings[image_path] =None
+            path_2_embeddings[image_path] =torch.empty((0, 0), dtype=torch.float32)
 
     return path_2_embeddings
+
+
+
+def load_face_vector_store():
+    global face_vs
+    global face_meta_data
+    if face_vs is not None and face_meta_data is not None:
+        return face_vs, face_meta_data
+
+    face_vs, face_meta_data = load_or_init_vector_store(FACE_VS_PATH , emb_dim=face_emb_dim)
+    return face_vs, face_meta_data
+
+def load_person_vector_store():
+    global person_vs
+    global person_meta_data
+    if person_vs is not None and person_meta_data is not None:
+        return person_vs, person_meta_data
+
+    person_vs, person_meta_data = load_or_init_vector_store(PERSON_VS_PATH , emb_dim=face_emb_dim)
+    return person_vs, person_meta_data
+
+
+
+def _embedding_row(embedding: torch.Tensor) -> np.ndarray:
+    return embedding.unsqueeze(0).cpu().numpy().astype("float32")
+
+
+def _update_person_centroid(person_id: int, embedding: torch.Tensor, person_meta_data: dict, person_vs) -> None:
+    person_key = str(person_id)
+    person_entry = person_meta_data[person_key]
+    previous_count = int(person_entry["count"])
+    previous_centroid = torch.tensor(person_entry["centroid"], dtype=torch.float32)
+
+    updated_centroid = ((previous_centroid * previous_count) + embedding) / (previous_count + 1)
+    updated_centroid = F.normalize(updated_centroid.unsqueeze(0), dim=1).squeeze(0).cpu()
+
+    person_vs.remove_ids(np.array([person_id], dtype=np.int64))
+    person_vs.add_with_ids(
+        updated_centroid.unsqueeze(0).numpy().astype("float32"),
+        np.array([person_id], dtype=np.int64),
+    )
+
+    person_entry["count"] = previous_count + 1
+    person_entry["centroid"] = updated_centroid.tolist()
+
+
+
+
+
+def add_faces_to_vector_store(path_2_embeddings: dict[Path, torch.Tensor], path_2_boxes: dict[Path, list]):
+    face_vs, face_meta_data = load_face_vector_store()
+    person_vs, person_meta_data = load_person_vector_store()
+    for image_path, embeddings in path_2_embeddings.items():
+        for i, embedding in enumerate(embeddings):
+            embedding_row = _embedding_row(embedding)
+            face_box = path_2_boxes[image_path][i].xyxy[0].tolist()
+
+            if person_vs.ntotal == 0:
+                person_id = consume_next_id(person_meta_data)
+                person_vs.add_with_ids(embedding_row, np.array([person_id], dtype=np.int64))
+                person_meta_data[str(person_id)] = {
+                    "count": 1,
+                    "centroid": embedding.tolist(),
+                    "image_paths": [str(image_path)],
+                    "face_boxes": [face_box],
+                }
+            else:
+                scores, ids = person_vs.search(embedding_row, k=1)
+                best_score = float(scores[0][0])
+                person_id = int(ids[0][0])
+
+                if best_score < FACE_MERGE_THRESHOLD or person_id < 0:
+                    person_id = consume_next_id(person_meta_data)
+                    person_vs.add_with_ids(embedding_row, np.array([person_id], dtype=np.int64))
+                    person_meta_data[str(person_id)] = {
+                        "count": 1,
+                        "centroid": embedding.tolist(),
+                        "image_paths": [str(image_path)],
+                        "face_boxes": [face_box],
+                    }
+                else:
+                    _update_person_centroid(person_id, embedding, person_meta_data, person_vs)
+                    person_meta_data[str(person_id)]["image_paths"].append(str(image_path))
+                    person_meta_data[str(person_id)]["face_boxes"].append(face_box)
+
+            face_id = consume_next_id(face_meta_data)
+            face_vs.add_with_ids(embedding_row, np.array([face_id], dtype=np.int64))
+            face_meta_data[str(face_id)] = {
+                "person_id": person_id,
+                "image_path": str(image_path),
+                "face_box": face_box,
+            }
+
+
 
     
 
@@ -101,8 +214,7 @@ def detect_faces(image_paths: list[Path]):
     returns a dict mapping each image path to a list of bounding boxes (if any)
     """
     model = load_face_detector()
-    sources = [str(path) for path in image_paths]
-    results = model.predict(sources, save=False)
+    results = model.predict(image_paths, save=False)
     path_2_boxes = {}
     for image_path, result in zip(image_paths, results):
         if result.boxes is not None:
@@ -122,33 +234,3 @@ def crop_faces(path_2_boxes)-> dict[Path, list[Image.Image]]:
     return path_2_crops
 
 
-"""
-
-image_paths = [
-    Path("image.png"),
-]
-
-sources = [str(path) for path in image_paths]
-results = model.predict(sources, save=False)
-
-for image_path, result in zip(image_paths, results):
-    print(f"\nImage: {image_path}")
-    print(result)
-
-    if result.boxes is not None:
-        for index, box in enumerate(result.boxes, start=1):
-            x1, y1, x2, y2 = box.xyxy[0].tolist()
-            confidence = float(box.conf[0]) if box.conf is not None else 0.0
-            print(
-                f"Box {index}: "
-                f"({x1:.1f}, {y1:.1f}) -> ({x2:.1f}, {y2:.1f}) "
-                f"confidence={confidence:.3f}"
-            )
-    else:
-        print("No boxes detected.")
-
-    annotated_bgr = result.plot()
-    annotated_rgb = annotated_bgr[..., ::-1]
-    annotated_image = Image.fromarray(annotated_rgb)
-    annotated_image.show(title=f"Detection Result - {image_path.name}")
-"""
