@@ -7,3 +7,4 @@ sentencepiece>=0.2.0
 torch>=2.2.0
 tqdm>=4.66.0
 transformers>=4.57.0
+sqlmodel>=0.0.16
