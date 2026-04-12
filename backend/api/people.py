@@ -17,21 +17,21 @@ def read_people(skip: int = 0, limit: int = 100, session: Session = Depends(get_
     return PersonService.get_all(session=session, skip=skip, limit=limit)
 
 @router.get("/{person_id}", response_model=PersonRead)
-def read_person(person_id: str, session: Session = Depends(get_session)):
+def read_person(person_id: int, session: Session = Depends(get_session)):
     person = PersonService.get(session=session, person_id=person_id)
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
     return person
 
 @router.patch("/{person_id}", response_model=PersonRead)
-def update_person(person_id: str, person_in: PersonUpdate, session: Session = Depends(get_session)):
+def update_person(person_id: int, person_in: PersonUpdate, session: Session = Depends(get_session)):
     person = PersonService.update(session=session, person_id=person_id, person_in=person_in)
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
     return person
 
 @router.delete("/{person_id}")
-def delete_person(person_id: str, session: Session = Depends(get_session)):
+def delete_person(person_id: int, session: Session = Depends(get_session)):
     success = PersonService.delete(session=session, person_id=person_id)
     if not success:
         raise HTTPException(status_code=404, detail="Person not found")

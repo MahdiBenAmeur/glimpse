@@ -13,7 +13,7 @@ class ImageService:
         return image
 
     @staticmethod
-    def get(session: Session, image_id: str) -> Optional[Image]:
+    def get(session: Session, image_id: int) -> Optional[Image]:
         return session.get(Image, image_id)
 
     @staticmethod
@@ -21,7 +21,7 @@ class ImageService:
         return session.exec(select(Image).offset(skip).limit(limit)).all()
 
     @staticmethod
-    def update(session: Session, image_id: str, image_in: ImageUpdate) -> Optional[Image]:
+    def update(session: Session, image_id: int, image_in: ImageUpdate) -> Optional[Image]:
         db_image = session.get(Image, image_id)
         if not db_image:
             return None
@@ -34,7 +34,7 @@ class ImageService:
         return db_image
 
     @staticmethod
-    def delete(session: Session, image_id: str) -> bool:
+    def delete(session: Session, image_id: int) -> bool:
         db_image = session.get(Image, image_id)
         if not db_image:
             return False

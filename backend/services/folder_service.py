@@ -13,7 +13,7 @@ class FolderService:
         return folder
 
     @staticmethod
-    def get(session: Session, folder_id: str) -> Optional[Folder]:
+    def get(session: Session, folder_id: int) -> Optional[Folder]:
         return session.get(Folder, folder_id)
 
     @staticmethod
@@ -21,7 +21,7 @@ class FolderService:
         return session.exec(select(Folder).offset(skip).limit(limit)).all()
 
     @staticmethod
-    def update(session: Session, folder_id: str, folder_in: FolderUpdate) -> Optional[Folder]:
+    def update(session: Session, folder_id: int, folder_in: FolderUpdate) -> Optional[Folder]:
         db_folder = session.get(Folder, folder_id)
         if not db_folder:
             return None
@@ -34,7 +34,7 @@ class FolderService:
         return db_folder
 
     @staticmethod
-    def delete(session: Session, folder_id: str) -> bool:
+    def delete(session: Session, folder_id: int) -> bool:
         db_folder = session.get(Folder, folder_id)
         if not db_folder:
             return False

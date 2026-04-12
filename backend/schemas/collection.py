@@ -9,7 +9,7 @@ class CollectionBase(BaseModel):
     modified_date: Optional[datetime] = None
 
 class CollectionCreate(CollectionBase):
-    id: str
+    pass
 
 class CollectionUpdate(BaseModel):
     name: Optional[str] = None
@@ -18,6 +18,6 @@ class CollectionUpdate(BaseModel):
     modified_date: Optional[datetime] = None
 
 class CollectionRead(CollectionBase):
-    id: str
+    id: int
     class Config:
         from_attributes = True

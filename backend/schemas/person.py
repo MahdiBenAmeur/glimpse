@@ -9,7 +9,7 @@ class PersonBase(BaseModel):
     last_seen: Optional[datetime] = None
 
 class PersonCreate(PersonBase):
-    id: str
+    id: int
 
 class PersonUpdate(BaseModel):
     name: Optional[str] = None
@@ -18,6 +18,6 @@ class PersonUpdate(BaseModel):
     last_seen: Optional[datetime] = None
 
 class PersonRead(PersonBase):
-    id: str
+    id: int
     class Config:
         from_attributes = True

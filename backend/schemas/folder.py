@@ -10,7 +10,7 @@ class FolderBase(BaseModel):
     include_subfolders: bool = True
 
 class FolderCreate(FolderBase):
-    id: str
+    pass
 
 class FolderUpdate(BaseModel):
     path: Optional[str] = None
@@ -20,6 +20,6 @@ class FolderUpdate(BaseModel):
     include_subfolders: Optional[bool] = None
 
 class FolderRead(FolderBase):
-    id: str
+    id: int
     class Config:
         from_attributes = True

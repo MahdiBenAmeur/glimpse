@@ -17,21 +17,21 @@ def read_images(skip: int = 0, limit: int = 100, session: Session = Depends(get_
     return ImageService.get_all(session=session, skip=skip, limit=limit)
 
 @router.get("/{image_id}", response_model=ImageRead)
-def read_image(image_id: str, session: Session = Depends(get_session)):
+def read_image(image_id: int, session: Session = Depends(get_session)):
     image = ImageService.get(session=session, image_id=image_id)
     if not image:
         raise HTTPException(status_code=404, detail="Image not found")
     return image
 
 @router.patch("/{image_id}", response_model=ImageRead)
-def update_image(image_id: str, image_in: ImageUpdate, session: Session = Depends(get_session)):
+def update_image(image_id: int, image_in: ImageUpdate, session: Session = Depends(get_session)):
     image = ImageService.update(session=session, image_id=image_id, image_in=image_in)
     if not image:
         raise HTTPException(status_code=404, detail="Image not found")
     return image
 
 @router.delete("/{image_id}")
-def delete_image(image_id: str, session: Session = Depends(get_session)):
+def delete_image(image_id: int, session: Session = Depends(get_session)):
     success = ImageService.delete(session=session, image_id=image_id)
     if not success:
         raise HTTPException(status_code=404, detail="Image not found")

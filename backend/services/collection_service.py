@@ -13,7 +13,7 @@ class CollectionService:
         return collection
 
     @staticmethod
-    def get(session: Session, collection_id: str) -> Optional[Collection]:
+    def get(session: Session, collection_id: int) -> Optional[Collection]:
         return session.get(Collection, collection_id)
 
     @staticmethod
@@ -21,7 +21,7 @@ class CollectionService:
         return session.exec(select(Collection).offset(skip).limit(limit)).all()
 
     @staticmethod
-    def update(session: Session, collection_id: str, collection_in: CollectionUpdate) -> Optional[Collection]:
+    def update(session: Session, collection_id: int, collection_in: CollectionUpdate) -> Optional[Collection]:
         db_collection = session.get(Collection, collection_id)
         if not db_collection:
             return None
@@ -35,7 +35,7 @@ class CollectionService:
         return db_collection
 
     @staticmethod
-    def delete(session: Session, collection_id: str) -> bool:
+    def delete(session: Session, collection_id: int) -> bool:
         db_collection = session.get(Collection, collection_id)
         if not db_collection:
             return False

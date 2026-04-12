@@ -13,7 +13,7 @@ class PersonService:
         return person
 
     @staticmethod
-    def get(session: Session, person_id: str) -> Optional[Person]:
+    def get(session: Session, person_id: int) -> Optional[Person]:
         return session.get(Person, person_id)
 
     @staticmethod
@@ -21,7 +21,7 @@ class PersonService:
         return session.exec(select(Person).offset(skip).limit(limit)).all()
 
     @staticmethod
-    def update(session: Session, person_id: str, person_in: PersonUpdate) -> Optional[Person]:
+    def update(session: Session, person_id: int, person_in: PersonUpdate) -> Optional[Person]:
         db_person = session.get(Person, person_id)
         if not db_person:
             return None
@@ -34,7 +34,7 @@ class PersonService:
         return db_person
 
     @staticmethod
-    def delete(session: Session, person_id: str) -> bool:
+    def delete(session: Session, person_id: int) -> bool:
         db_person = session.get(Person, person_id)
         if not db_person:
             return False

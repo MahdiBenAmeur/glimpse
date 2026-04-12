@@ -8,10 +8,10 @@ from .collection import Collection
 
 class Image(SQLModel, table=True):
     __tablename__ = "images"
-    id: str = Field(primary_key=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
     url: str
     filename: str
-    folder_id: Optional[str] = Field(default=None, foreign_key="folders.id")
+    folder_id: Optional[int] = Field(default=None, foreign_key="folders.id")
     date_taken: Optional[datetime] = None
     width: Optional[int] = None
     height: Optional[int] = None
