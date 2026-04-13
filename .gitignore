@@ -8,3 +8,6 @@ desktopvenv
 backend/data/cache_dir
 backend/data/artifacts
 test_images
+backend/data/face_vector_store
+backend/data/image_vector_store
+backend/data/person_vector_store
