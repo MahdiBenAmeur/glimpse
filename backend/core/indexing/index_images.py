@@ -59,18 +59,18 @@ def index_image_batch(
 
     embeddings = image_model.embed_images(valid_paths)
     image_vector_store, image_store_meta_data = load_image_vector_store(int(embeddings.shape[1]), image_model)
+    image_ids = [consume_next_id(image_store_meta_data) for _ in valid_paths]
+    ids_array = np.array(image_ids, dtype=np.int64)
+    embeddings_array = embeddings.numpy().astype("float32")
 
-    for image_path, embedding in zip(valid_paths, embeddings):
-        image_id = consume_next_id(image_store_meta_data)
-        image_vector_store.add_with_ids(
-            embedding.unsqueeze(0).numpy().astype("float32"),
-            np.array([image_id], dtype=np.int64),
-        )
+    image_vector_store.add_with_ids(embeddings_array, ids_array)
+
+    for image_path, image_id in zip(valid_paths, image_ids):
         image_store_meta_data[str(image_id)] = {
             "image_path": str(image_path),
         }
-        stats["indexed_count"] += 1
         stats["indexed_ids"].append(image_id)
 
+    stats["indexed_count"] = len(image_ids)
     stats["store_total"] = int(image_vector_store.ntotal)
     return stats
