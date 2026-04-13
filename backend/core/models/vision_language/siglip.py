@@ -27,7 +27,7 @@ class SiglipEmbeddingModel(BaseEmbeddingModel):
         with torch.inference_mode():
             image_features = model.get_image_features(**inputs)
 
-        return self._normalize_embeddings(image_features)
+        return self._normalize_embeddings(_coerce_siglip_features(image_features))
 
     def embed_texts(self, texts: Sequence[str]) -> torch.Tensor:
         self._validate_texts(texts)
@@ -44,4 +44,18 @@ class SiglipEmbeddingModel(BaseEmbeddingModel):
         with torch.inference_mode():
             text_features = model.get_text_features(**inputs)
 
-        return self._normalize_embeddings(text_features)
+        return self._normalize_embeddings(_coerce_siglip_features(text_features))
+
+
+def _coerce_siglip_features(output) -> torch.Tensor:
+    if isinstance(output, torch.Tensor):
+        return output
+
+    pooled_output = getattr(output, "pooler_output", None)
+    if isinstance(pooled_output, torch.Tensor):
+        return pooled_output
+
+    raise TypeError(
+        "SigLIP feature output did not match the expected contract. "
+        f"Expected a tensor or an object with pooler_output, got {type(output).__name__}."
+    )

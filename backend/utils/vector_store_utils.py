@@ -1,6 +1,9 @@
 import faiss
 import json
+import numpy as np
+import shutil
 from pathlib import Path
+import torch
 
 
 def create_empty_index(emb_dim=512):
@@ -48,9 +51,19 @@ def consume_next_id(meta_data: dict) -> int:
     return next_id
 
 
+def embedding_row(embedding: torch.Tensor) -> np.ndarray:
+    return embedding.unsqueeze(0).cpu().numpy().astype("float32")
+
+
 def save_vs(vs, meta_data, vs_path):
     index_path = Path(vs_path) / "index.faiss"
     meta_data_path = Path(vs_path) / "meta_data.json"
     faiss.write_index(vs, str(index_path))
     with open(meta_data_path, "w") as f:
         json.dump(meta_data, f)
+
+
+def delete_vs(vs_path):
+    store_dir = Path(vs_path)
+    if store_dir.exists():
+        shutil.rmtree(store_dir)

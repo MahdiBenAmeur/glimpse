@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 
 from backend.config import FACE_MERGE_THRESHOLD, FACE_VS_PATH, PERSON_VS_PATH
-from backend.utils.vector_store_utils import consume_next_id, load_or_init_vector_store, save_vs
+from backend.utils.vector_store_utils import consume_next_id, embedding_row, load_or_init_vector_store, save_vs
 
 
 face_emb_dim = 512
@@ -42,11 +42,6 @@ def save_face_vector_stores() -> None:
     save_vs(face_vector_store, face_store_meta_data, FACE_VS_PATH)
     save_vs(person_vector_store, person_store_meta_data, PERSON_VS_PATH)
 
-
-def _embedding_row(embedding: torch.Tensor) -> np.ndarray:
-    return embedding.unsqueeze(0).cpu().numpy().astype("float32")
-
-
 def _update_person_centroid(person_id: int, embedding: torch.Tensor, person_meta_data: dict, person_vs) -> None:
     person_key = str(person_id)
     person_entry = person_meta_data[person_key]
@@ -77,12 +72,12 @@ def add_faces_to_vector_store(path_2_embeddings: dict[Path, torch.Tensor], path_
 
     for image_path, embeddings in path_2_embeddings.items():
         for i, embedding in enumerate(embeddings):
-            embedding_row = _embedding_row(embedding)
+            row = embedding_row(embedding)
             face_box = path_2_boxes[image_path][i].xyxy[0].tolist()
 
             if person_vs.ntotal == 0:
                 person_id = consume_next_id(person_meta_data)
-                person_vs.add_with_ids(embedding_row, np.array([person_id], dtype=np.int64))
+                person_vs.add_with_ids(row, np.array([person_id], dtype=np.int64))
                 person_meta_data[str(person_id)] = {
                     "count": 1,
                     "centroid": embedding.tolist(),
@@ -91,13 +86,13 @@ def add_faces_to_vector_store(path_2_embeddings: dict[Path, torch.Tensor], path_
                 }
                 stats["new_person_count"] += 1
             else:
-                scores, ids = person_vs.search(embedding_row, k=1)
+                scores, ids = person_vs.search(row, k=1)
                 best_score = float(scores[0][0])
                 person_id = int(ids[0][0])
 
                 if best_score < FACE_MERGE_THRESHOLD or person_id < 0:
                     person_id = consume_next_id(person_meta_data)
-                    person_vs.add_with_ids(embedding_row, np.array([person_id], dtype=np.int64))
+                    person_vs.add_with_ids(row, np.array([person_id], dtype=np.int64))
                     person_meta_data[str(person_id)] = {
                         "count": 1,
                         "centroid": embedding.tolist(),
@@ -111,7 +106,7 @@ def add_faces_to_vector_store(path_2_embeddings: dict[Path, torch.Tensor], path_
                     person_meta_data[str(person_id)]["face_boxes"].append(face_box)
 
             face_id = consume_next_id(face_meta_data)
-            face_vs.add_with_ids(embedding_row, np.array([face_id], dtype=np.int64))
+            face_vs.add_with_ids(row, np.array([face_id], dtype=np.int64))
             face_meta_data[str(face_id)] = {
                 "person_id": person_id,
                 "image_path": str(image_path),

@@ -16,4 +16,4 @@ models_cache_dir = "backend/data/cache_dir/"
 # FACE CONFIG
 DETECTOR_MODEL = None
 FACE_EMBEDDING_MODEL = None
-FACE_MERGE_THRESHOLD = 0.3
+FACE_MERGE_THRESHOLD = 0.35
