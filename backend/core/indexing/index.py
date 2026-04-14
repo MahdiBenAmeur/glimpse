@@ -1,29 +1,14 @@
 from pathlib import Path
 from typing import Sequence
 
-from PIL import Image
-
 from backend.core.indexing.index_faces import index_face_batch
-from backend.core.indexing.index_images import coerce_image_paths
 from backend.core.indexing.index_images import index_image_batch
-from backend.core.indexing.index_images import prepare_image_paths
 from backend.core.models.faces.detector import load_face_detector
 from backend.core.models.faces.embedding import load_face_embedding_model
 from backend.core.models.faces.store import save_face_vector_stores
 from backend.core.models.vision_language.base import BaseEmbeddingModel
 from backend.core.models.vision_language.store import save_image_vector_store
-
-
-IMAGE_SUFFIXES = {suffix.lower() for suffix in Image.registered_extensions()}
-
-
-def _list_folder_files(folder_path: Path, *, recursive: bool) -> list[Path]:
-    iterator = folder_path.rglob("*") if recursive else folder_path.iterdir()
-    return sorted(
-        path
-        for path in iterator
-        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
-    )
+from backend.utils.image_processing import coerce_image_paths, list_image_files, prepare_images
 
 
 def _chunk_paths(paths: Sequence[Path], batch_size: int) -> list[list[Path]]:
@@ -40,7 +25,7 @@ def index_batch(
     save_after_batch: bool = False,
 ) -> dict:
     normalized_paths = coerce_image_paths(image_paths)
-    valid_paths, failed_items = prepare_image_paths(normalized_paths)
+    valid_paths, failed_items, path_2_created_at = prepare_images(normalized_paths)
 
     stats = {
         "input_count": len(normalized_paths),
@@ -64,11 +49,13 @@ def index_batch(
         image_model,
         valid_paths,
         validate_inputs=False,
+        path_2_created_at=path_2_created_at,
     )
     face_stats = index_face_batch(
         valid_paths,
         embedding_batch_size=batch_size,
         validate_inputs=False,
+        path_2_created_at=path_2_created_at,
     )
 
     stats["image_indexing"] = image_stats
@@ -98,7 +85,7 @@ def index_folder(
     if not folder.is_dir():
         raise NotADirectoryError(f"Path is not a directory: {folder}")
 
-    discovered_files = _list_folder_files(folder, recursive=recursive)
+    discovered_files = list_image_files(folder, recursive=recursive)
     batches = _chunk_paths(discovered_files, batch_size) if discovered_files else []
 
     stats = {

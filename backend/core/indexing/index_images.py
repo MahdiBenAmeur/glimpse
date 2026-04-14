@@ -1,49 +1,26 @@
-from pathlib import Path
 from typing import Sequence
 
 import numpy as np
-from PIL import Image
 
 from backend.core.models.vision_language.base import BaseEmbeddingModel
 from backend.core.models.vision_language.store import load_image_vector_store
+from backend.utils.image_processing import coerce_image_paths, prepare_images
 from backend.utils.vector_store_utils import consume_next_id
-
-
-def coerce_image_paths(image_paths: Sequence[str | Path]) -> list[Path]:
-    return [Path(path) for path in image_paths]
-
-
-def prepare_image_paths(image_paths: Sequence[str | Path]) -> tuple[list[Path], list[dict]]:
-    valid_paths: list[Path] = []
-    failed_items: list[dict] = []
-
-    for path in coerce_image_paths(image_paths):
-        if not path.exists():
-            failed_items.append({"path": str(path), "reason": "missing"})
-            continue
-        if not path.is_file():
-            failed_items.append({"path": str(path), "reason": "not_a_file"})
-            continue
-
-        try:
-            with Image.open(path) as image:
-                image.verify()
-        except Exception as exc:
-            failed_items.append({"path": str(path), "reason": f"invalid_image: {exc}"})
-            continue
-
-        valid_paths.append(path)
-
-    return valid_paths, failed_items
-
+from pathlib import Path
 
 def index_image_batch(
     image_model: BaseEmbeddingModel,
     image_paths: Sequence[str | Path],
     *,
     validate_inputs: bool = True,
+    path_2_created_at: dict[Path, str | None] | None = None,
 ) -> dict:
-    valid_paths, failed_items = prepare_image_paths(image_paths) if validate_inputs else (coerce_image_paths(image_paths), [])
+    if validate_inputs:
+        valid_paths, failed_items, prepared_created_at = prepare_images(image_paths)
+        path_2_created_at = prepared_created_at
+    else:
+        valid_paths, failed_items = coerce_image_paths(image_paths), []
+        path_2_created_at = path_2_created_at or {}
 
     stats = {
         "input_count": len(image_paths),
@@ -68,6 +45,7 @@ def index_image_batch(
     for image_path, image_id in zip(valid_paths, image_ids):
         image_store_meta_data[str(image_id)] = {
             "image_path": str(image_path),
+            "created_at": path_2_created_at.get(image_path) if path_2_created_at is not None else None,
         }
         stats["indexed_ids"].append(image_id)
 

@@ -61,7 +61,12 @@ def _update_person_centroid(person_id: int, embedding: torch.Tensor, person_meta
     person_entry["centroid"] = updated_centroid.tolist()
 
 
-def add_faces_to_vector_store(path_2_embeddings: dict[Path, torch.Tensor], path_2_boxes: dict[Path, list]):
+def add_faces_to_vector_store(
+    path_2_embeddings: dict[Path, torch.Tensor],
+    path_2_boxes: dict[Path, list],
+    *,
+    path_2_created_at: dict[Path, str | None] | None = None,
+):
     face_vs, face_meta_data = load_face_vector_store()
     person_vs, person_meta_data = load_person_vector_store()
     stats = {
@@ -71,6 +76,7 @@ def add_faces_to_vector_store(path_2_embeddings: dict[Path, torch.Tensor], path_
     }
 
     for image_path, embeddings in path_2_embeddings.items():
+        created_at = path_2_created_at.get(image_path) if path_2_created_at is not None else None
         for i, embedding in enumerate(embeddings):
             row = embedding_row(embedding)
             face_box = path_2_boxes[image_path][i].xyxy[0].tolist()
@@ -82,6 +88,7 @@ def add_faces_to_vector_store(path_2_embeddings: dict[Path, torch.Tensor], path_
                     "count": 1,
                     "centroid": embedding.tolist(),
                     "image_paths": [str(image_path)],
+                    "image_created_ats": [created_at],
                     "face_boxes": [face_box],
                 }
                 stats["new_person_count"] += 1
@@ -97,12 +104,14 @@ def add_faces_to_vector_store(path_2_embeddings: dict[Path, torch.Tensor], path_
                         "count": 1,
                         "centroid": embedding.tolist(),
                         "image_paths": [str(image_path)],
+                        "image_created_ats": [created_at],
                         "face_boxes": [face_box],
                     }
                     stats["new_person_count"] += 1
                 else:
                     _update_person_centroid(person_id, embedding, person_meta_data, person_vs)
                     person_meta_data[str(person_id)]["image_paths"].append(str(image_path))
+                    person_meta_data[str(person_id)].setdefault("image_created_ats", []).append(created_at)
                     person_meta_data[str(person_id)]["face_boxes"].append(face_box)
 
             face_id = consume_next_id(face_meta_data)
@@ -110,6 +119,7 @@ def add_faces_to_vector_store(path_2_embeddings: dict[Path, torch.Tensor], path_
             face_meta_data[str(face_id)] = {
                 "person_id": person_id,
                 "image_path": str(image_path),
+                "created_at": created_at,
                 "face_box": face_box,
             }
             stats["indexed_face_count"] += 1
