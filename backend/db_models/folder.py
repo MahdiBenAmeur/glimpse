@@ -1,9 +1,6 @@
-from sqlmodel import SQLModel, Field, Relationship
-from typing import Optional, List, TYPE_CHECKING
+from sqlmodel import SQLModel, Field
+from typing import Optional
 from datetime import datetime
-
-if TYPE_CHECKING:
-    from .image import Image
     
 class Folder(SQLModel, table=True):
     __tablename__ = "folders"
@@ -13,5 +10,3 @@ class Folder(SQLModel, table=True):
     last_scan_time: Optional[datetime] = None
     status: Optional[str] = None
     include_subfolders: bool = Field(default=False)
-
-    images: List[Image] = Relationship(back_populates="folder")

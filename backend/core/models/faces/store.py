@@ -16,6 +16,17 @@ person_vs = None
 person_meta_data = None
 
 
+def reset_face_vector_stores() -> None:
+    global face_vs
+    global face_meta_data
+    global person_vs
+    global person_meta_data
+    face_vs = None
+    face_meta_data = None
+    person_vs = None
+    person_meta_data = None
+
+
 def load_face_vector_store():
     global face_vs
     global face_meta_data

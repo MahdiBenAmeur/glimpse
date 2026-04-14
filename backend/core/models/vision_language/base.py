@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Sequence
 import torch
 from PIL import Image
+from huggingface_hub import snapshot_download
 from transformers.image_utils import load_image
 
 from backend.config import device, models_cache_dir
@@ -49,10 +50,12 @@ class BaseEmbeddingModel:
             return True
 
         try:
-            processor = self._load_processor(local_files_only=True)
-            model = self._load_model(local_files_only=True)
-            del processor
-            del model
+            snapshot_download(
+                repo_id=self.CKPT,
+                cache_dir=models_cache_dir,
+                local_files_only=True,
+                **({"allow_patterns": ["*.json", "*.txt", "*.model", "*.safetensors", "*.bin", "*.py"]}),
+            )
             return True
         except Exception:
             return False
@@ -81,6 +84,17 @@ class BaseEmbeddingModel:
         self._model = self._load_model(local_files_only=True).to(device)
         self._model.eval()
         return self._processor, self._model
+
+    def unload_model(self) -> None:
+        self._processor = None
+        if self._model is not None:
+            try:
+                self._model.to("cpu")
+            except Exception:
+                pass
+        self._model = None
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def _normalize_embeddings(self, embeddings: torch.Tensor) -> torch.Tensor:
         embeddings = embeddings.to(torch.float32)

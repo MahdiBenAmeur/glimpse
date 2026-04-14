@@ -1,11 +1,11 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 from datetime import datetime
 
 class SavedSearchBase(BaseModel):
     name: str
     query: Optional[str] = ""
-    filters: Dict[str, Any] = {}
+    filters: Dict[str, Any] = Field(default_factory=dict)
     last_used: Optional[datetime] = None
 
 class SavedSearchCreate(SavedSearchBase):
@@ -18,4 +18,4 @@ class SavedSearchUpdate(BaseModel):
     last_used: Optional[datetime] = None
 
 class SavedSearchRead(SavedSearchBase):
-    id: int
+    id: str

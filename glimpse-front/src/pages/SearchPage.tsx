@@ -1,39 +1,209 @@
-import { useState, useMemo } from "react";
-import { Search as SearchIcon, SlidersHorizontal, X, RefreshCw, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Search as SearchIcon, SlidersHorizontal, X, RefreshCw, Sparkles, ImageUp, BookmarkPlus } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { useApp } from "@/contexts/AppContext";
 import { EXAMPLE_SEARCHES } from "@/data/mockData";
 import { ResultsGrid } from "@/components/search/ResultsGrid";
 import { AdvancedFiltersDrawer } from "@/components/search/AdvancedFiltersDrawer";
 
+type SearchFilterState = {
+  folders: string[];
+  dateRange: "any" | "today" | "last-7-days" | "last-30-days" | "this-year";
+  facePresence: "any" | "faces" | "no-faces";
+  people: Array<{ id: number; preference: "must_include" | "prefer" | "exclude" }>;
+  facePhotoPath: string | null;
+};
+
+type SearchRouteState = {
+  savedSearch?: {
+    id?: string;
+    name: string;
+    query: string;
+    filters?: Record<string, unknown>;
+  };
+  similarImageId?: string | number;
+  similarSourceLabel?: string;
+} | null;
+
+function getPathLabel(path: string) {
+  const normalized = path.replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+  return parts.slice(-2).join("/") || normalized;
+}
+
+function normalizeSearchFilters(filters?: Record<string, unknown>): SearchFilterState {
+  const rawPeople = Array.isArray(filters?.people) ? filters.people : [];
+  const people = rawPeople
+    .map((person) => {
+      if (!person || typeof person !== "object") return null;
+      const candidate = person as { id?: unknown; preference?: unknown };
+      const id = Number(candidate.id);
+      if (!Number.isFinite(id)) return null;
+      const preference = candidate.preference === "exclude" || candidate.preference === "prefer" ? candidate.preference : "must_include";
+      return { id, preference };
+    })
+    .filter((value): value is { id: number; preference: "must_include" | "prefer" | "exclude" } => value !== null);
+
+  return {
+    folders: Array.isArray(filters?.folders) ? filters.folders.map(String) : [],
+    dateRange:
+      filters?.dateRange === "today" ||
+      filters?.dateRange === "last-7-days" ||
+      filters?.dateRange === "last-30-days" ||
+      filters?.dateRange === "this-year"
+        ? filters.dateRange
+        : "any",
+    facePresence: filters?.facePresence === "faces" || filters?.facePresence === "no-faces" ? filters.facePresence : "any",
+    people,
+    facePhotoPath: typeof filters?.facePhotoPath === "string" ? filters.facePhotoPath : null,
+  };
+}
+
+function buildFilterLabels(
+  filters: SearchFilterState,
+  peopleLookup: Map<number, string>,
+) {
+  const labels: string[] = [];
+  filters.folders.forEach((folder) => labels.push(`Folder: ${getPathLabel(folder)}`));
+  if (filters.dateRange !== "any") labels.push(`Date: ${filters.dateRange}`);
+  if (filters.facePresence !== "any") labels.push(filters.facePresence === "faces" ? "Contains faces" : "No faces");
+  filters.people.forEach((person) => {
+    const name = peopleLookup.get(person.id) ?? `Person ${person.id}`;
+    const prefix = person.preference === "exclude" ? "Exclude" : person.preference === "prefer" ? "Prefer" : "Must include";
+    labels.push(`${prefix}: ${name}`);
+  });
+  return labels;
+}
+
 export default function SearchPage() {
-  const { images, activeModel, lastIndexedTime, indexingStatus } = useApp();
+  const { images, activeModel, lastIndexedTime, people, searchImages, searchSimilarImages, searchImagesByFile, startIndexing, saveSearch } = useApp();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
+  const [searchFilterRequest, setSearchFilterRequest] = useState<SearchFilterState>({
+    folders: [],
+    dateRange: "any",
+    facePresence: "any",
+    people: [],
+    facePhotoPath: null,
+  });
+  const [isDraggingImage, setIsDraggingImage] = useState(false);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
+
+  const peopleLookup = useMemo(
+    () => new Map(people.filter((person) => person.name).map((person) => [Number(person.id), person.name as string])),
+    [people],
+  );
 
   const indexFresh = lastIndexedTime
     ? (Date.now() - new Date(lastIndexedTime).getTime()) < 86400000
     : false;
 
-  const results = useMemo(() => {
-    if (!hasSearched) return [];
-    if (!query.trim()) return images;
-    return images.filter((_, i) => i % 2 === 0 || query.length < 5);
-  }, [hasSearched, query, images]);
-
-  const handleSearch = () => {
+  const handleSearch = async () => {
     if (!query.trim()) return;
-    setIsSearching(true);
     setHasSearched(true);
-    setTimeout(() => setIsSearching(false), 800);
+    setIsSearching(true);
+    try {
+      await searchImages(query, searchFilterRequest);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSearchByFile = async (file: File) => {
+    setHasSearched(true);
+    setIsSearching(true);
+    setQuery(`Similar to ${file.name}`);
+    setActiveFilters([]);
+    setSearchFilterRequest({
+      folders: [],
+      dateRange: "any",
+      facePresence: "any",
+      people: [],
+      facePhotoPath: null,
+    });
+    try {
+      await searchImagesByFile(file);
+    } finally {
+      setIsSearching(false);
+    }
   };
 
   const removeFilter = (f: string) => setActiveFilters(prev => prev.filter(x => x !== f));
+  const clearFilters = () => {
+    setActiveFilters([]);
+    setSearchFilterRequest({
+      folders: [],
+      dateRange: "any",
+      facePresence: "any",
+      people: [],
+      facePhotoPath: null,
+    });
+  };
+
+  const handleSaveCurrentSearch = async () => {
+    if (!saveName.trim() || !query.trim()) return;
+    await saveSearch(saveName.trim(), query.trim(), searchFilterRequest as Record<string, unknown>);
+    setSaveDialogOpen(false);
+    setSaveName("");
+  };
+
+  useEffect(() => {
+    const state = location.state as SearchRouteState;
+    if (!state) return;
+
+    let cancelled = false;
+    const run = async () => {
+      if (state.savedSearch) {
+        const nextFilters = normalizeSearchFilters(state.savedSearch.filters);
+        setQuery(state.savedSearch.query || "");
+        setSearchFilterRequest(nextFilters);
+        setActiveFilters(buildFilterLabels(nextFilters, peopleLookup));
+        setHasSearched(true);
+        setIsSearching(true);
+        try {
+          await searchImages(state.savedSearch.query || "", nextFilters);
+        } finally {
+          if (!cancelled) {
+            setIsSearching(false);
+            navigate(location.pathname, { replace: true, state: null });
+          }
+        }
+        return;
+      }
+
+      if (state.similarImageId !== undefined) {
+        setQuery(`Similar to ${state.similarSourceLabel ?? "image"}`);
+        setActiveFilters([]);
+        setHasSearched(true);
+        setIsSearching(true);
+        try {
+          await searchSimilarImages(state.similarImageId);
+        } finally {
+          if (!cancelled) {
+            setIsSearching(false);
+            navigate(location.pathname, { replace: true, state: null });
+          }
+        }
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname, location.state, navigate, peopleLookup, searchImages, searchSimilarImages]);
 
   return (
     <div className="h-full flex flex-col">
@@ -49,8 +219,11 @@ export default function SearchPage() {
           <Badge variant={indexFresh ? "secondary" : "destructive"} className="text-[11px] font-normal">
             {indexFresh ? "Index up to date" : "Index outdated"}
           </Badge>
-          <Button variant="ghost" size="sm" className="h-8 text-xs gap-1.5">
+          <Button variant="ghost" size="sm" className="h-8 text-xs gap-1.5" onClick={() => void startIndexing({ resetIndex: true })}>
             <RefreshCw className="w-3 h-3" /> Reindex
+          </Button>
+          <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={() => setSaveDialogOpen(true)} disabled={!query.trim()}>
+            <BookmarkPlus className="w-3 h-3" /> Save search
           </Button>
           <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={() => setFiltersOpen(true)}>
             <SlidersHorizontal className="w-3 h-3" /> Filters
@@ -78,6 +251,48 @@ export default function SearchPage() {
             <Button size="sm" className="h-7 text-xs px-3" onClick={handleSearch}>Search</Button>
           </div>
         </div>
+        <div
+          className={`max-w-2xl mx-auto mt-3 rounded-xl border border-dashed px-4 py-3 text-center transition-colors ${
+            isDraggingImage ? "border-primary bg-accent" : "border-border bg-card"
+          }`}
+          onDragOver={(event) => {
+            event.preventDefault();
+            setIsDraggingImage(true);
+          }}
+          onDragLeave={(event) => {
+            event.preventDefault();
+            setIsDraggingImage(false);
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            setIsDraggingImage(false);
+            const file = event.dataTransfer.files?.[0];
+            if (file) {
+              void handleSearchByFile(file);
+            }
+          }}
+        >
+          <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+            <ImageUp className="w-3.5 h-3.5" />
+            <span>Drop an image here to find similar photos</span>
+            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => fileInputRef.current?.click()}>
+              Choose image
+            </Button>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) {
+                void handleSearchByFile(file);
+              }
+              event.currentTarget.value = "";
+            }}
+          />
+        </div>
       </div>
 
       {/* Active filters */}
@@ -91,7 +306,7 @@ export default function SearchPage() {
               </button>
             </Badge>
           ))}
-          <button onClick={() => setActiveFilters([])} className="text-xs text-muted-foreground hover:text-foreground">
+          <button onClick={clearFilters} className="text-xs text-muted-foreground hover:text-foreground">
             Clear all
           </button>
         </div>
@@ -99,22 +314,60 @@ export default function SearchPage() {
 
       {/* Results */}
       <div className="flex-1 overflow-auto px-6 pb-6">
-        {!hasSearched ? (
-          <EmptySearchState onExampleClick={(q) => { setQuery(q); }} />
-        ) : isSearching ? (
+        {isSearching ? (
           <SkeletonGrid />
-        ) : results.length === 0 ? (
-          <NoResultsState onClearFilters={() => setActiveFilters([])} />
+        ) : !hasSearched ? (
+          <EmptySearchState onExampleClick={(q) => { setQuery(q); }} />
+        ) : images.length === 0 ? (
+          <NoResultsState onClearFilters={clearFilters} />
         ) : (
-          <ResultsGrid images={results} />
+          <ResultsGrid images={images} />
         )}
       </div>
 
       <AdvancedFiltersDrawer
         open={filtersOpen}
         onOpenChange={setFiltersOpen}
-        onApply={(filters) => { setActiveFilters(filters); setFiltersOpen(false); }}
+        onApply={(filters) => {
+          setActiveFilters(filters.labels);
+          setSearchFilterRequest({
+            folders: filters.folders,
+            dateRange: filters.dateRange,
+            facePresence: filters.facePresence,
+            people: filters.people.map((person) => ({ id: person.id, preference: person.preference })),
+            facePhotoPath: filters.facePhotoPath,
+          });
+          setFiltersOpen(false);
+        }}
       />
+
+      <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-base">Save Search</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs">Name</Label>
+              <Input
+                value={saveName}
+                onChange={(event) => setSaveName(event.target.value)}
+                className="mt-1 h-9 text-sm"
+                placeholder="My search"
+              />
+            </div>
+            <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              Query: {query || "No query"}
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setSaveDialogOpen(false)}>Cancel</Button>
+            <Button size="sm" onClick={() => void handleSaveCurrentSearch()} disabled={!saveName.trim() || !query.trim()}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

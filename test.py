@@ -5,11 +5,13 @@ from PIL import Image, ImageDraw
 from backend.core.indexing.index import index_folder
 from backend.core.models.vision_language.siglip import SiglipEmbeddingModel
 from backend.core.search.search import global_search, search_by_face, search_by_person_id
+from backend.core.models.vision_language.clip import ClipEmbeddingModel
 
 def test_index_folder():
     folder_path = "test_images"
-    siglipmodel = SiglipEmbeddingModel()
-    stats = index_folder(folder_path, image_model=siglipmodel, batch_size=4, save_after_batch=False)
+    #siglipmodel = SiglipEmbeddingModel()
+    clipmodel = ClipEmbeddingModel()
+    stats = index_folder(folder_path, image_model=clipmodel, batch_size=4, save_after_batch=False)
 
     print(stats)
 
@@ -158,7 +160,7 @@ def test_person_id_boxed_images(person_id: int, max_images: int = 30):
 
 
 if __name__ == "__main__":
-    #test_index_folder()
+    test_index_folder()
     #test_person_id_boxed_images(person_id=0, max_images=10)
-    siglipmodel  = SiglipEmbeddingModel()
-    print(global_search("happy", image_model=siglipmodel, k=10, page_number=1, face_presence="any", person_filters = [{"person_id": 2, "preference": "exclude"}]))
+    #siglipmodel  = ClipEmbeddingModel()
+    #print(global_search("happy", image_model=siglipmodel, k=10, page_number=1, face_presence="any", person_filters = [{"person_id": 2, "preference": "exclude"}]))

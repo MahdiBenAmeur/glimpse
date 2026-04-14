@@ -9,6 +9,17 @@ image_vs = None
 image_meta_data = None
 
 
+def get_loaded_image_metadata() -> dict | None:
+    return image_meta_data
+
+
+def reset_image_vector_store() -> None:
+    global image_vs
+    global image_meta_data
+    image_vs = None
+    image_meta_data = None
+
+
 def _ensure_image_store_metadata(meta_data: dict, image_model: BaseEmbeddingModel, emb_dim: int) -> None:
     model_ckpt = getattr(image_model, "CKPT", image_model.__class__.__name__)
 

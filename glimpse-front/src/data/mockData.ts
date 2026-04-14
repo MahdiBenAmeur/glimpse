@@ -29,7 +29,10 @@ export interface PersonInfo {
 
 export interface ImageResult {
   id: string;
+  imageId?: number;
   url: string;
+  thumbnailUrl?: string;
+  path?: string;
   filename: string;
   folder: string;
   dateTaken: string;
@@ -39,6 +42,7 @@ export interface ImageResult {
   faceCount: number;
   people: string[];
   collections: string[];
+  score?: number;
 }
 
 export interface CollectionInfo {

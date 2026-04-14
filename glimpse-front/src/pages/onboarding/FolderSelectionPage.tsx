@@ -1,31 +1,20 @@
-import { FolderPlus, X, ToggleLeft } from "lucide-react";
+import { FolderPlus, ImagePlus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { useApp } from "@/contexts/AppContext";
 import { useState } from "react";
 
-const SAMPLE_PATHS = [
-  "/Users/alex/Photos",
-  "/Users/alex/Pictures",
-  "/Users/alex/Desktop/Screenshots",
-  "/Users/alex/Documents/Projects/Photos",
-];
-
 export default function FolderSelectionPage() {
-  const { folders, addFolder, removeFolder, setOnboardingStep, startIndexing } = useApp();
+  const { folders, addFolder, addPhotos, removeFolder, setOnboardingStep, startIndexing } = useApp();
   const [includeSubfolders, setIncludeSubfolders] = useState(true);
-  const [pathIdx, setPathIdx] = useState(0);
 
-  const handleAddFolder = () => {
-    const path = SAMPLE_PATHS[pathIdx % SAMPLE_PATHS.length];
-    addFolder(path);
-    setPathIdx(prev => prev + 1);
-  };
+  const handleAddFolder = () => void addFolder(undefined, includeSubfolders);
+  const handleAddPhotos = () => void addPhotos();
 
   const handleContinue = () => {
     setOnboardingStep(2);
-    startIndexing();
+    void startIndexing({ resetIndex: true });
   };
 
   return (
@@ -61,9 +50,14 @@ export default function FolderSelectionPage() {
         </div>
 
         <div className="flex items-center justify-between mb-6">
-          <Button variant="outline" size="sm" className="text-xs gap-1.5" onClick={handleAddFolder}>
-            <FolderPlus className="w-3.5 h-3.5" /> Add folder
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="text-xs gap-1.5" onClick={handleAddFolder}>
+              <FolderPlus className="w-3.5 h-3.5" /> Add folder path
+            </Button>
+            <Button variant="outline" size="sm" className="text-xs gap-1.5" onClick={handleAddPhotos}>
+              <ImagePlus className="w-3.5 h-3.5" /> Add photos
+            </Button>
+          </div>
           <div className="flex items-center gap-2">
             <Switch id="subfolders" checked={includeSubfolders} onCheckedChange={setIncludeSubfolders} />
             <Label htmlFor="subfolders" className="text-xs">Include subfolders</Label>

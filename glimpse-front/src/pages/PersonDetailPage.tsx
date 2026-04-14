@@ -1,19 +1,26 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Edit2, Merge, Scissors, Trash2, Search } from "lucide-react";
+import { ArrowLeft, Edit2, Trash2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useApp } from "@/contexts/AppContext";
 import { ResultsGrid } from "@/components/search/ResultsGrid";
+import { getPersonImages } from "@/lib/api";
 
 export default function PersonDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { people, images, renamePerson } = useApp();
+  const { people, renamePerson } = useApp();
   const person = people.find(p => p.id === id);
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(person?.name || "");
+  const [personImages, setPersonImages] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!id) return;
+    void getPersonImages(id).then(setPersonImages).catch(() => setPersonImages([]));
+  }, [id]);
 
   if (!person) {
     return (
@@ -23,8 +30,6 @@ export default function PersonDetailPage() {
       </div>
     );
   }
-
-  const personImages = images.filter(img => img.people.includes(person.name || ""));
 
   const handleSaveName = () => {
     if (editName.trim()) {
@@ -65,12 +70,6 @@ export default function PersonDetailPage() {
           <div className="flex items-center gap-2 mt-3">
             <Button variant="outline" size="sm" className="text-xs h-7 gap-1" onClick={() => setIsEditing(true)}>
               <Edit2 className="w-3 h-3" /> Rename
-            </Button>
-            <Button variant="outline" size="sm" className="text-xs h-7 gap-1">
-              <Merge className="w-3 h-3" /> Merge
-            </Button>
-            <Button variant="outline" size="sm" className="text-xs h-7 gap-1">
-              <Scissors className="w-3 h-3" /> Split
             </Button>
             <Button variant="outline" size="sm" className="text-xs h-7 gap-1">
               <Search className="w-3 h-3" /> Search

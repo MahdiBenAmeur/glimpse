@@ -1,10 +1,6 @@
-from sqlmodel import SQLModel, Field, Relationship
-from typing import Optional, List
+from sqlmodel import SQLModel, Field
+from typing import Optional
 from datetime import datetime
-from .links import ImagePeopleLink, ImageCollectionLink
-from .folder import Folder
-from .person import Person
-from .collection import Collection
 
 class Image(SQLModel, table=True):
     __tablename__ = "images"
@@ -17,7 +13,3 @@ class Image(SQLModel, table=True):
     height: Optional[int] = None
     is_favorite: bool = Field(default=False)
     face_count: int = Field(default=0)
-
-    folder: Optional[Folder] = Relationship(back_populates="images")
-    people: List[Person] = Relationship(back_populates="images", link_model=ImagePeopleLink)
-    collections: List[Collection] = Relationship(back_populates="images", link_model=ImageCollectionLink)

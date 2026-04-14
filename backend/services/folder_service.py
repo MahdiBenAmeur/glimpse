@@ -2,11 +2,77 @@ from sqlmodel import Session, select
 from backend.db_models.folder import Folder
 from backend.schemas.folder import FolderCreate, FolderUpdate
 from typing import List, Optional
+from backend.utils.path_utils import canonicalize_path, canonicalize_path_key
+
+
+def _folder_score(folder: Folder) -> tuple[int, int, int]:
+    return (
+        int(folder.image_count or 0),
+        1 if folder.last_scan_time is not None else 0,
+        int(folder.id or 0),
+    )
+
+
+def _dedupe_visible_folders(folders: list[Folder]) -> list[Folder]:
+    best_by_key: dict[str, Folder] = {}
+    for folder in folders:
+        key = canonicalize_path_key(folder.path)
+        existing = best_by_key.get(key)
+        folder.path = canonicalize_path(folder.path)
+        if existing is None or _folder_score(folder) > _folder_score(existing):
+            best_by_key[key] = folder
+    return sorted(best_by_key.values(), key=lambda folder: int(folder.id or 0))
+
+
+def _find_matching_folders(session: Session, path: str) -> list[Folder]:
+    target_key = canonicalize_path_key(path)
+    matches = [
+        folder
+        for folder in session.exec(select(Folder)).all()
+        if canonicalize_path_key(folder.path) == target_key
+    ]
+    for folder in matches:
+        folder.path = canonicalize_path(folder.path)
+    return matches
+
+
+def _find_existing_folder(session: Session, path: str) -> Folder | None:
+    matches = _find_matching_folders(session, path)
+    if not matches:
+        return None
+    best_match = max(matches, key=_folder_score)
+    return best_match
+
+
+def _collapse_duplicate_folders(session: Session, keep_folder: Folder, *, path: str) -> None:
+    duplicates = [
+        folder
+        for folder in _find_matching_folders(session, path)
+        if int(folder.id or 0) != int(keep_folder.id or 0)
+    ]
+    if not duplicates:
+        return
+    for duplicate in duplicates:
+        session.delete(duplicate)
+    session.add(keep_folder)
+    session.commit()
+    session.refresh(keep_folder)
 
 class FolderService:
     @staticmethod
     def create(session: Session, folder_in: FolderCreate) -> Folder:
-        folder = Folder.model_validate(folder_in)
+        payload = folder_in.model_dump()
+        payload["path"] = canonicalize_path(payload["path"])
+        existing = _find_existing_folder(session, payload["path"])
+        if existing is not None:
+            existing.include_subfolders = payload.get("include_subfolders", existing.include_subfolders)
+            existing.status = payload.get("status", existing.status)
+            session.add(existing)
+            session.commit()
+            session.refresh(existing)
+            _collapse_duplicate_folders(session, existing, path=payload["path"])
+            return existing
+        folder = Folder.model_validate(payload)
         session.add(folder)
         session.commit()
         session.refresh(folder)
@@ -18,7 +84,9 @@ class FolderService:
 
     @staticmethod
     def get_all(session: Session, skip: int = 0, limit: int = 100) -> List[Folder]:
-        return session.exec(select(Folder).offset(skip).limit(limit)).all()
+        folders = session.exec(select(Folder)).all()
+        visible = _dedupe_visible_folders(folders)
+        return visible[skip : skip + limit]
 
     @staticmethod
     def update(session: Session, folder_id: int, folder_in: FolderUpdate) -> Optional[Folder]:
@@ -26,6 +94,8 @@ class FolderService:
         if not db_folder:
             return None
         update_data = folder_in.model_dump(exclude_unset=True)
+        if "path" in update_data and update_data["path"] is not None:
+            update_data["path"] = canonicalize_path(update_data["path"])
         for key, value in update_data.items():
             setattr(db_folder, key, value)
         session.add(db_folder)
@@ -38,6 +108,7 @@ class FolderService:
         db_folder = session.get(Folder, folder_id)
         if not db_folder:
             return False
-        session.delete(db_folder)
+        for folder in _find_matching_folders(session, db_folder.path):
+            session.delete(folder)
         session.commit()
         return True

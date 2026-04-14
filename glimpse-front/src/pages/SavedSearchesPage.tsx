@@ -30,7 +30,12 @@ export default function SavedSearchesPage() {
                 <p className="text-[10px] text-muted-foreground mt-1">Last used: {ss.lastUsed}</p>
               </div>
               <div className="flex items-center gap-1 shrink-0">
-                <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => navigate("/search")}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs gap-1"
+                  onClick={() => navigate("/search", { state: { savedSearch: ss } })}
+                >
                   <Play className="w-3 h-3" /> Run
                 </Button>
                 <Button variant="ghost" size="icon" className="h-7 w-7">

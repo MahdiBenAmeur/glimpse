@@ -1,14 +1,47 @@
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Edit2, Trash2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useApp } from "@/contexts/AppContext";
 import { ResultsGrid } from "@/components/search/ResultsGrid";
+import { getCollectionImages, pickCollectionImages } from "@/lib/api";
+import { toast } from "@/components/ui/sonner";
 
 export default function CollectionDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { collections, images, deleteCollection } = useApp();
+  const { collections, deleteCollection, refreshData } = useApp();
   const collection = collections.find(c => c.id === id);
+  const [collectionImages, setCollectionImages] = useState<any[]>([]);
+
+  const loadCollectionImages = async (collectionId: string) => {
+    const images = await getCollectionImages(collectionId);
+    setCollectionImages(images);
+  };
+
+  useEffect(() => {
+    if (!id) return;
+    void loadCollectionImages(id).catch(() => setCollectionImages([]));
+  }, [id]);
+
+  const handleAddPhotos = async () => {
+    if (!id) return;
+    try {
+      const result = await pickCollectionImages(id);
+      await refreshData();
+      await loadCollectionImages(id);
+      toast.success(`${result.addedCount} photo${result.addedCount === 1 ? "" : "s"} added to the collection.`);
+      if (result.autoIndexedCount > 0) {
+        toast.info(`${result.autoIndexedCount} selected photo${result.autoIndexedCount === 1 ? "" : "s"} were indexed automatically before being added.`);
+      }
+      if (result.skippedPaths.length > 0) {
+        toast.info(`${result.skippedPaths.length} selected photo${result.skippedPaths.length === 1 ? "" : "s"} could not be added.`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not add photos to the collection.";
+      toast.error(message);
+    }
+  };
 
   if (!collection) {
     return (
@@ -18,8 +51,6 @@ export default function CollectionDetailPage() {
       </div>
     );
   }
-
-  const collectionImages = images.filter(img => img.collections.includes(collection.name));
 
   return (
     <div className="p-6">
@@ -34,7 +65,7 @@ export default function CollectionDetailPage() {
           <p className="text-[10px] text-muted-foreground mt-1">{collection.imageCount} items</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="text-xs h-8 gap-1">
+          <Button variant="outline" size="sm" className="text-xs h-8 gap-1" onClick={() => void handleAddPhotos()}>
             <Plus className="w-3 h-3" /> Add photos
           </Button>
           <Button variant="outline" size="sm" className="text-xs h-8 gap-1">

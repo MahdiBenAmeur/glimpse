@@ -5,9 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { useApp } from "@/contexts/AppContext";
 
 export default function ModelSetupPage() {
-  const { models, downloadModel, setActiveModel, setOnboardingStep } = useApp();
+  const { models, activeModel, downloadModel, setActiveModel, setOnboardingStep } = useApp();
   const hasActive = models.some(m => m.status === "active");
-  const hasInstalled = models.some(m => m.status === "installed" || m.status === "active");
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-8">
@@ -23,6 +22,12 @@ export default function ModelSetupPage() {
         </div>
 
         <div className="space-y-3 mb-8">
+          {models.length === 0 && (
+            <div className="border border-dashed border-border rounded-xl p-6 text-center bg-card">
+              <p className="text-sm text-foreground mb-1">No models loaded yet</p>
+              <p className="text-xs text-muted-foreground">Check that the backend is running and the model list endpoint is available.</p>
+            </div>
+          )}
           {models.map(model => (
             <div
               key={model.id}
@@ -48,7 +53,7 @@ export default function ModelSetupPage() {
                 </div>
                 <div className="flex flex-col items-end gap-1.5 shrink-0">
                   {model.status === "not_installed" && (
-                    <Button size="sm" variant="outline" className="text-xs h-8" onClick={() => downloadModel(model.id)}>
+                    <Button size="sm" variant="outline" className="text-xs h-8" onClick={() => void downloadModel(model.id)}>
                       <Download className="w-3 h-3 mr-1.5" /> Download
                     </Button>
                   )}
@@ -58,7 +63,7 @@ export default function ModelSetupPage() {
                     </Button>
                   )}
                   {model.status === "installed" && (
-                    <Button size="sm" className="text-xs h-8" onClick={() => setActiveModel(model.id)}>
+                    <Button size="sm" className="text-xs h-8" onClick={() => void setActiveModel(model.id)}>
                       <Check className="w-3 h-3 mr-1.5" /> Use this model
                     </Button>
                   )}
@@ -75,7 +80,9 @@ export default function ModelSetupPage() {
         </div>
 
         <div className="flex items-center justify-between">
-          <p className="text-[10px] text-muted-foreground">All data stays on your device.</p>
+          <p className="text-[10px] text-muted-foreground">
+            {activeModel ? `Selected: ${activeModel.name}` : "All data stays on your device."}
+          </p>
           <Button
             disabled={!hasActive}
             onClick={() => setOnboardingStep(1)}

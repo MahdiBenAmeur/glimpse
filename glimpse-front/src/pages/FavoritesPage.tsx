@@ -5,9 +5,8 @@ import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 
 export default function FavoritesPage() {
-  const { images } = useApp();
+  const { favorites } = useApp();
   const navigate = useNavigate();
-  const favorites = images.filter(img => img.isFavorite);
 
   return (
     <div className="p-6">

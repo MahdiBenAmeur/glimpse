@@ -56,8 +56,10 @@ def embedding_row(embedding: torch.Tensor) -> np.ndarray:
 
 
 def save_vs(vs, meta_data, vs_path):
-    index_path = Path(vs_path) / "index.faiss"
-    meta_data_path = Path(vs_path) / "meta_data.json"
+    store_dir = Path(vs_path)
+    store_dir.mkdir(parents=True, exist_ok=True)
+    index_path = store_dir / "index.faiss"
+    meta_data_path = store_dir / "meta_data.json"
     faiss.write_index(vs, str(index_path))
     with open(meta_data_path, "w") as f:
         json.dump(meta_data, f)

@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 from typing import Sequence
 
@@ -49,6 +50,11 @@ def prepare_images(image_paths: Sequence[str | Path]) -> tuple[list[Path], list[
             continue
 
         valid_paths.append(path)
+        if created_at is None:
+            try:
+                created_at = datetime.fromtimestamp(path.stat().st_mtime).isoformat()
+            except Exception:
+                created_at = None
         path_2_created_at[path] = created_at
 
     return valid_paths, failed_items, path_2_created_at

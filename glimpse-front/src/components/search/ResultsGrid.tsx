@@ -29,10 +29,15 @@ export function ResultsGrid({ images }: Props) {
           >
             <div className="aspect-[4/3] overflow-hidden">
               <img
-                src={img.url}
+                src={img.thumbnailUrl ?? img.url}
                 alt={img.filename}
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                 loading="lazy"
+                onError={(event) => {
+                  if (img.thumbnailUrl && event.currentTarget.src !== new URL(img.url, window.location.origin).toString()) {
+                    event.currentTarget.src = img.url;
+                  }
+                }}
               />
             </div>
             {/* Hover overlay */}

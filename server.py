@@ -6,7 +6,10 @@ from backend.db_models.database import create_db_and_tables
 from backend.api.collections import router as collections_router
 from backend.api.folders import router as folders_router
 from backend.api.images import router as images_router
+from backend.api.index import router as index_router
 from backend.api.people import router as people_router
+from backend.api.saved_searches import router as saved_searches_router
+from backend.api.search import router as search_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -34,8 +37,16 @@ app.add_middleware(
 app.include_router(collections_router, prefix="/api")
 app.include_router(folders_router, prefix="/api")
 app.include_router(images_router, prefix="/api")
+app.include_router(index_router, prefix="/api")
 app.include_router(people_router, prefix="/api")
+app.include_router(saved_searches_router, prefix="/api")
+app.include_router(search_router, prefix="/api")
 
 @app.get("/")
 def read_root():
     return {"message": "Welcome to Glimpse API"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

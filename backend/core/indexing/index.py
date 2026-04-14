@@ -8,7 +8,36 @@ from backend.core.models.faces.embedding import load_face_embedding_model
 from backend.core.models.faces.store import save_face_vector_stores
 from backend.core.models.vision_language.base import BaseEmbeddingModel
 from backend.core.models.vision_language.store import save_image_vector_store
+from backend.services.library_state_service import load_image_meta_data
 from backend.utils.image_processing import coerce_image_paths, list_image_files, prepare_images
+from backend.utils.path_utils import canonicalize_path_key
+
+
+def _dedupe_unindexed_paths(
+    valid_paths: list[Path],
+    path_2_created_at: dict[Path, str | None],
+) -> tuple[list[Path], dict[Path, str | None], list[dict]]:
+    image_meta_data = load_image_meta_data()
+    seen_keys = {
+        canonicalize_path_key(entry.get("image_path"))
+        for key, entry in image_meta_data.items()
+        if not str(key).startswith("_") and isinstance(entry, dict) and entry.get("image_path")
+    }
+
+    unique_paths: list[Path] = []
+    unique_created_at: dict[Path, str | None] = {}
+    skipped_existing: list[dict] = []
+
+    for path in valid_paths:
+        path_key = canonicalize_path_key(path)
+        if path_key in seen_keys:
+            skipped_existing.append({"path": str(path), "reason": "already_indexed"})
+            continue
+        seen_keys.add(path_key)
+        unique_paths.append(path)
+        unique_created_at[path] = path_2_created_at.get(path)
+
+    return unique_paths, unique_created_at, skipped_existing
 
 
 def _chunk_paths(paths: Sequence[Path], batch_size: int) -> list[list[Path]]:
@@ -37,6 +66,13 @@ def index_batch(
         "total_people_in_batch": 0,
         "new_people_count": 0,
     }
+
+    if not valid_paths:
+        return stats
+
+    valid_paths, path_2_created_at, skipped_existing = _dedupe_unindexed_paths(valid_paths, path_2_created_at)
+    stats["skipped_existing_count"] = len(skipped_existing)
+    stats["skipped_existing_items"] = skipped_existing
 
     if not valid_paths:
         return stats

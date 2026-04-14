@@ -11,7 +11,14 @@ import { useApp } from "@/contexts/AppContext";
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onApply: (filters: string[]) => void;
+  onApply: (filters: {
+    labels: string[];
+    folders: string[];
+    dateRange: "any" | "today" | "last-7-days" | "last-30-days" | "this-year";
+    facePresence: "any" | "faces" | "no-faces";
+    people: Array<{ id: number; name: string; preference: "must_include" | "prefer" | "exclude" }>;
+    facePhotoPath: string | null;
+  }) => void;
 }
 
 export function AdvancedFiltersDrawer({ open, onOpenChange, onApply }: Props) {
@@ -22,12 +29,23 @@ export function AdvancedFiltersDrawer({ open, onOpenChange, onApply }: Props) {
   const [selectedPeople, setSelectedPeople] = useState<{ id: string; name: string; mode: string }[]>([]);
 
   const handleApply = () => {
-    const filters: string[] = [];
-    selectedFolders.forEach(f => filters.push(`Folder: ${f.split("/").pop()}`));
-    if (dateRange !== "any") filters.push(`Date: ${dateRange}`);
-    if (facePresence !== "any") filters.push(facePresence === "faces" ? "Contains faces" : "No faces");
-    selectedPeople.forEach(p => filters.push(`${p.mode}: ${p.name}`));
-    onApply(filters);
+    const labels: string[] = [];
+    selectedFolders.forEach(f => labels.push(`Folder: ${f.split("/").pop()}`));
+    if (dateRange !== "any") labels.push(`Date: ${dateRange}`);
+    if (facePresence !== "any") labels.push(facePresence === "faces" ? "Contains faces" : "No faces");
+    selectedPeople.forEach(p => labels.push(`${p.mode}: ${p.name}`));
+    onApply({
+      labels,
+      folders: selectedFolders,
+      dateRange: dateRange as "any" | "today" | "last-7-days" | "last-30-days" | "this-year",
+      facePresence: facePresence as "any" | "faces" | "no-faces",
+      people: selectedPeople.map((person) => ({
+        id: Number(person.id),
+        name: person.name,
+        preference: person.mode === "Must include" ? "must_include" : person.mode === "Exclude" ? "exclude" : "prefer",
+      })),
+      facePhotoPath: null,
+    });
   };
 
   const handleReset = () => {

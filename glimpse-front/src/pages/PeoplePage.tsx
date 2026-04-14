@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Search, Users as UsersIcon, Edit2, Merge, Trash2 } from "lucide-react";
+import { Search, Users as UsersIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,7 +7,7 @@ import { useApp } from "@/contexts/AppContext";
 import { useNavigate } from "react-router-dom";
 
 export default function PeoplePage() {
-  const { people, renamePerson } = useApp();
+  const { people } = useApp();
   const [searchQuery, setSearchQuery] = useState("");
   const navigate = useNavigate();
 
@@ -44,9 +44,6 @@ export default function PeoplePage() {
               className="pl-9 h-8 text-xs"
             />
           </div>
-          <Button variant="outline" size="sm" className="text-xs h-8 gap-1.5">
-            <Merge className="w-3 h-3" /> Merge
-          </Button>
         </div>
       </div>
 

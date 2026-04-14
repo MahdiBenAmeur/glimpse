@@ -1,38 +1,77 @@
-import { Database, FolderOpen, Users, Image, Clock, HardDrive, RefreshCw, Plus, Trash2, AlertTriangle } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Database, FolderOpen, Users, Image, Clock, HardDrive, RefreshCw, Plus, Trash2, AlertTriangle, ImagePlus } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useApp } from "@/contexts/AppContext";
+import { getStorageSummary } from "@/lib/api";
 
 export default function IndexPage() {
-  const { folders, activeModel, lastIndexedTime, totalIndexedImages, people, indexingStatus, startIndexing, removeFolder } = useApp();
+  const {
+    folders,
+    activeModel,
+    lastIndexedTime,
+    totalIndexedImages,
+    people,
+    indexingStatus,
+    startIndexing,
+    removeFolder,
+    addFolder,
+    addPhotos,
+  } = useApp();
+  const [indexSizeLabel, setIndexSizeLabel] = useState("0 B");
 
   const isIndexing = indexingStatus.phase !== "idle" && indexingStatus.phase !== "complete";
+  const handleReindexFolder = (folderId: string) => void startIndexing({ folderIds: [folderId], resetIndex: false });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadStorage = async () => {
+      try {
+        const summary = await getStorageSummary();
+        if (!cancelled) {
+          setIndexSizeLabel(formatBytes(summary.indexSizeBytes));
+        }
+      } catch {
+        if (!cancelled) {
+          setIndexSizeLabel("Unavailable");
+        }
+      }
+    };
+
+    void loadStorage();
+    return () => {
+      cancelled = true;
+    };
+  }, [folders.length, totalIndexedImages, indexingStatus.phase]);
 
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold text-foreground">Index</h1>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="text-xs h-8 gap-1.5">
-            <Plus className="w-3 h-3" /> Add folder
+          <Button variant="outline" size="sm" className="text-xs h-8 gap-1.5" onClick={() => void addFolder()}>
+            <Plus className="w-3 h-3" /> Add folder path
           </Button>
-          <Button size="sm" className="text-xs h-8 gap-1.5" onClick={startIndexing} disabled={isIndexing}>
+          <Button variant="outline" size="sm" className="text-xs h-8 gap-1.5" onClick={() => void addPhotos()}>
+            <ImagePlus className="w-3 h-3" /> Add photos
+          </Button>
+          <Button size="sm" className="text-xs h-8 gap-1.5" onClick={() => void startIndexing({ resetIndex: true })} disabled={isIndexing}>
             <RefreshCw className={`w-3 h-3 ${isIndexing ? "animate-spin" : ""}`} /> Reindex now
           </Button>
         </div>
       </div>
 
-      {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
         <SummaryCard icon={Image} label="Images" value={totalIndexedImages.toLocaleString()} />
         <SummaryCard icon={Users} label="People" value={String(people.length)} />
         <SummaryCard icon={FolderOpen} label="Folders" value={String(folders.length)} />
         <SummaryCard icon={Database} label="Model" value={activeModel?.name || "None"} />
         <SummaryCard icon={Clock} label="Last indexed" value={lastIndexedTime ? new Date(lastIndexedTime).toLocaleDateString() : "Never"} />
-        <SummaryCard icon={HardDrive} label="Index size" value="142 MB" />
+        <SummaryCard icon={HardDrive} label="Index size" value={indexSizeLabel} />
       </div>
 
-      {/* Indexing progress */}
       {isIndexing && (
         <div className="bg-accent border border-border rounded-xl p-4 mb-6">
           <div className="flex items-center gap-2 mb-2">
@@ -44,12 +83,11 @@ export default function IndexPage() {
             <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${indexingStatus.progress}%` }} />
           </div>
           <p className="text-[10px] text-muted-foreground mt-2">
-            {indexingStatus.processed.toLocaleString()} / {indexingStatus.total.toLocaleString()} files • {indexingStatus.facesDetected} faces detected
+            {indexingStatus.processed.toLocaleString()} / {indexingStatus.total.toLocaleString()} files - {indexingStatus.facesDetected} faces detected
           </p>
         </div>
       )}
 
-      {/* Folders table */}
       <div>
         <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Indexed Folders</h2>
         {folders.length === 0 ? (
@@ -70,22 +108,22 @@ export default function IndexPage() {
                 </tr>
               </thead>
               <tbody>
-                {folders.map(f => (
-                  <tr key={f.id} className="border-b border-border last:border-0 hover:bg-muted/30">
-                    <td className="px-4 py-3 text-foreground truncate max-w-[300px]">{f.path}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{f.imageCount.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{new Date(f.lastScanTime).toLocaleDateString()}</td>
+                {folders.map((folder) => (
+                  <tr key={folder.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                    <td className="px-4 py-3 text-foreground truncate max-w-[300px]">{folder.path}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{folder.imageCount.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{folder.lastScanTime ? new Date(folder.lastScanTime).toLocaleDateString() : "Never"}</td>
                     <td className="px-4 py-3">
-                      <Badge variant={f.status === "ready" ? "secondary" : f.status === "scanning" ? "default" : "destructive"} className="text-[10px]">
-                        {f.status}
+                      <Badge variant={folder.status === "ready" ? "secondary" : folder.status === "scanning" ? "default" : "destructive"} className="text-[10px]">
+                        {folder.status}
                       </Badge>
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <Button variant="ghost" size="icon" className="h-6 w-6">
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleReindexFolder(folder.id)} disabled={isIndexing}>
                           <RefreshCw className="w-3 h-3" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => removeFolder(f.id)}>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={() => void removeFolder(folder.id)}>
                           <Trash2 className="w-3 h-3" />
                         </Button>
                       </div>
@@ -98,13 +136,12 @@ export default function IndexPage() {
         )}
       </div>
 
-      {/* Warnings */}
       {!activeModel && (
         <div className="mt-6 bg-warning/10 border border-warning/30 rounded-xl p-4 flex items-start gap-3">
           <AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
           <div>
             <p className="text-sm font-medium text-foreground">No model selected</p>
-            <p className="text-xs text-muted-foreground">Go to Settings → Models to download and activate a model.</p>
+            <p className="text-xs text-muted-foreground">Go to Settings -&gt; Models to download and activate a model.</p>
           </div>
         </div>
       )}
@@ -120,4 +157,16 @@ function SummaryCard({ icon: Icon, label, value }: { icon: React.ElementType; la
       <p className="text-[10px] text-muted-foreground">{label}</p>
     </div>
   );
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
 }

@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTheme } from "@/contexts/ThemeContext";
-import { Download, Check, Loader2, Trash2, AlertTriangle, HardDrive, FolderOpen } from "lucide-react";
+import { Download, Check, Loader2, AlertTriangle, HardDrive, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -9,7 +9,9 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { toast } from "@/components/ui/sonner";
 import { useApp } from "@/contexts/AppContext";
+import { clearCache, getStorageSummary, type StorageSummary } from "@/lib/api";
 
 const tabs = ["General", "Models", "Storage", "Indexing", "Interface"];
 
@@ -78,20 +80,20 @@ function GeneralSettings() {
 }
 
 function ModelsSettings() {
-  const { models, activeModel, downloadModel, setActiveModel, removeModel } = useApp();
+  const { models, activeModel, folders, totalIndexedImages, downloadModel, setActiveModel, switchModelAndRebuild } = useApp();
   const [switchDialog, setSwitchDialog] = useState<string | null>(null);
 
   const handleSwitch = (id: string) => {
-    if (activeModel) {
+    if (activeModel && (folders.length > 0 || totalIndexedImages > 0)) {
       setSwitchDialog(id);
     } else {
-      setActiveModel(id);
+      void setActiveModel(id);
     }
   };
 
-  const confirmSwitch = () => {
+  const confirmSwitch = async () => {
     if (switchDialog) {
-      setActiveModel(switchDialog);
+      await switchModelAndRebuild(switchDialog);
       setSwitchDialog(null);
     }
   };
@@ -128,7 +130,7 @@ function ModelsSettings() {
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 {model.status === "not_installed" && (
-                  <Button size="sm" variant="outline" className="text-xs h-8" onClick={() => downloadModel(model.id)}>
+                  <Button size="sm" variant="outline" className="text-xs h-8" onClick={() => void downloadModel(model.id)}>
                     <Download className="w-3 h-3 mr-1.5" /> Download
                   </Button>
                 )}
@@ -138,14 +140,9 @@ function ModelsSettings() {
                   </Button>
                 )}
                 {model.status === "installed" && (
-                  <>
-                    <Button size="sm" className="text-xs h-8" onClick={() => handleSwitch(model.id)}>
-                      <Check className="w-3 h-3 mr-1.5" /> Use
-                    </Button>
-                    <Button size="sm" variant="ghost" className="h-8 text-destructive hover:text-destructive" onClick={() => removeModel(model.id)}>
-                      <Trash2 className="w-3 h-3" />
-                    </Button>
-                  </>
+                  <Button size="sm" className="text-xs h-8" onClick={() => handleSwitch(model.id)}>
+                    <Check className="w-3 h-3 mr-1.5" /> {activeModel ? "Switch & rebuild" : "Use"}
+                  </Button>
                 )}
               </div>
             </div>
@@ -164,12 +161,11 @@ function ModelsSettings() {
           </DialogHeader>
           <div className="bg-warning/10 border border-warning/30 rounded-lg p-3 flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
-            <p className="text-xs text-foreground">Search quality may be degraded until you rebuild the index.</p>
+            <p className="text-xs text-foreground">Changing the active model starts a full rebuild immediately so search stays consistent.</p>
           </div>
           <DialogFooter className="gap-2">
             <Button variant="ghost" size="sm" onClick={() => setSwitchDialog(null)}>Cancel</Button>
-            <Button variant="outline" size="sm" onClick={confirmSwitch}>Switch, rebuild later</Button>
-            <Button size="sm" onClick={() => { confirmSwitch(); }}>Switch & rebuild now</Button>
+            <Button size="sm" onClick={() => { void confirmSwitch(); }}>Switch & rebuild now</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -178,6 +174,26 @@ function ModelsSettings() {
 }
 
 function StorageSettings() {
+  const [storage, setStorage] = useState<StorageSummary | null>(null);
+  const [isClearingCache, setIsClearingCache] = useState(false);
+
+  useEffect(() => {
+    void getStorageSummary().then(setStorage).catch(() => setStorage(null));
+  }, []);
+
+  const handleClearCache = async () => {
+    setIsClearingCache(true);
+    try {
+      const nextStorage = await clearCache();
+      setStorage(nextStorage);
+      toast.success("Thumbnail cache cleared.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not clear cache.");
+    } finally {
+      setIsClearingCache(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <h2 className="text-base font-medium text-foreground">Storage</h2>
@@ -187,22 +203,24 @@ function StorageSettings() {
             <HardDrive className="w-4 h-4 text-muted-foreground" />
             <div>
               <p className="text-sm font-medium text-foreground">Index storage</p>
-              <p className="text-xs text-muted-foreground">~/.glimpse-one/index/</p>
+              <p className="text-xs text-muted-foreground">{storage?.indexPath || "backend/data"}</p>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">142 MB used</p>
+          <p className="text-xs text-muted-foreground">{formatBytes(storage?.indexSizeBytes ?? 0)} used</p>
         </div>
         <div className="bg-card border border-border rounded-xl p-4">
           <div className="flex items-center gap-3 mb-2">
             <FolderOpen className="w-4 h-4 text-muted-foreground" />
             <div>
               <p className="text-sm font-medium text-foreground">Thumbnail cache</p>
-              <p className="text-xs text-muted-foreground">~/.glimpse-one/thumbnails/</p>
+              <p className="text-xs text-muted-foreground">{storage?.thumbnailCachePath || "backend/data/thumbnails"}</p>
             </div>
           </div>
           <div className="flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">89 MB used</p>
-            <Button variant="outline" size="sm" className="text-xs h-7">Clear cache</Button>
+            <p className="text-xs text-muted-foreground">{formatBytes(storage?.thumbnailCacheBytes ?? 0)} used</p>
+            <Button variant="outline" size="sm" className="text-xs h-7" onClick={() => void handleClearCache()} disabled={isClearingCache}>
+              {isClearingCache ? "Clearing..." : "Clear cache"}
+            </Button>
           </div>
         </div>
       </div>
@@ -281,4 +299,16 @@ function SettingRow({ label, description, children }: { label: string; descripti
       {children}
     </div>
   );
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
 }
