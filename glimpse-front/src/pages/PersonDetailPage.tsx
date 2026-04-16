@@ -5,12 +5,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useApp } from "@/contexts/AppContext";
+import { usePeople, useRenamePerson } from "@/hooks/api/usePeople";
+import { useImages } from "@/hooks/api/useImages";
 import { ResultsGrid } from "@/components/search/ResultsGrid";
 
 export default function PersonDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { people, images, renamePerson } = useApp();
+  const { data: people = [] } = usePeople();
+  const { data: images = [] } = useImages();
+  const { mutate: renamePerson } = useRenamePerson();
   const person = people.find(p => p.id === id);
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(person?.name || "");
@@ -28,7 +32,7 @@ export default function PersonDetailPage() {
 
   const handleSaveName = () => {
     if (editName.trim()) {
-      renamePerson(person.id, editName.trim());
+      renamePerson({ id: person.id, name: editName.trim() });
       setIsEditing(false);
     }
   };

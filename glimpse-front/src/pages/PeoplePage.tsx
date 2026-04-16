@@ -3,11 +3,11 @@ import { Search, Users as UsersIcon, Edit2, Merge, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useApp } from "@/contexts/AppContext";
+import { usePeople } from "@/hooks/api/usePeople";
 import { useNavigate } from "react-router-dom";
 
 export default function PeoplePage() {
-  const { people, renamePerson } = useApp();
+  const { data: people = [] } = usePeople();
   const [searchQuery, setSearchQuery] = useState("");
   const navigate = useNavigate();
 

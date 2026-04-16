@@ -5,7 +5,9 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppProvider, useApp } from "@/contexts/AppContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import { CollectionProvider } from "@/contexts/CollectionContext";
 import { AppLayout } from "@/components/layout/AppLayout";
+import LandingPage from "@/pages/LandingPage";
 import ModelSetupPage from "@/pages/onboarding/ModelSetupPage";
 import FolderSelectionPage from "@/pages/onboarding/FolderSelectionPage";
 import InitialIndexingPage from "@/pages/onboarding/InitialIndexingPage";
@@ -32,9 +34,9 @@ function AppRoutes() {
   }
 
   return (
-    <AppLayout>
-      <Routes>
-        <Route path="/" element={<Navigate to="/search" replace />} />
+    <Routes>
+      <Route path="/" element={<LandingPage />} />
+      <Route element={<AppLayout />}>
         <Route path="/search" element={<SearchPage />} />
         <Route path="/people" element={<PeoplePage />} />
         <Route path="/people/:id" element={<PersonDetailPage />} />
@@ -45,8 +47,8 @@ function AppRoutes() {
         <Route path="/index-manager" element={<IndexPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<NotFound />} />
-      </Routes>
-    </AppLayout>
+      </Route>
+    </Routes>
   );
 }
 
@@ -57,9 +59,13 @@ const App = () => (
         <Toaster />
         <Sonner />
         <AppProvider>
-          <BrowserRouter>
-            <AppRoutes />
-          </BrowserRouter>
+          <CollectionProvider>
+            <BrowserRouter
+              future={{ v7_relativeSplatPath: true }}
+            >
+              <AppRoutes />
+            </BrowserRouter>
+          </CollectionProvider>
         </AppProvider>
       </TooltipProvider>
     </ThemeProvider>

@@ -1,7 +1,7 @@
 import { X, Heart, ChevronLeft, ChevronRight, ExternalLink, FolderOpen, Copy, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useApp } from "@/contexts/AppContext";
+import { useToggleFavorite } from "@/hooks/api/useImages";
 import type { ImageResult } from "@/data/mockData";
 import { useEffect, useCallback } from "react";
 
@@ -14,7 +14,7 @@ interface Props {
 }
 
 export function ImageViewer({ image, images, currentIndex, onClose, onNavigate }: Props) {
-  const { toggleFavorite } = useApp();
+  const { mutate: toggleFavorite } = useToggleFavorite();
 
   const goNext = useCallback(() => {
     if (currentIndex < images.length - 1) onNavigate(currentIndex + 1);
@@ -29,7 +29,7 @@ export function ImageViewer({ image, images, currentIndex, onClose, onNavigate }
       if (e.key === "Escape") onClose();
       if (e.key === "ArrowRight") goNext();
       if (e.key === "ArrowLeft") goPrev();
-      if (e.key === "f" || e.key === "F") toggleFavorite(image.id);
+      if (e.key === "f" || e.key === "F") toggleFavorite({ id: image.id, isFav: !image.isFavorite });
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -87,7 +87,7 @@ export function ImageViewer({ image, images, currentIndex, onClose, onNavigate }
           variant="ghost"
           size="sm"
           className="justify-start gap-2 text-xs mb-2"
-          onClick={() => toggleFavorite(image.id)}
+          onClick={() => toggleFavorite({ id: image.id, isFav: !image.isFavorite })}
         >
           <Heart className={`w-3.5 h-3.5 ${image.isFavorite ? "fill-destructive text-destructive" : ""}`} />
           {image.isFavorite ? "Unfavorite" : "Favorite"}

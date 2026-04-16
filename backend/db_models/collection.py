@@ -12,6 +12,6 @@ class Collection(SQLModel, table=True):
     name: str
     description: Optional[str] = None
     image_count: int = Field(default=0)
-    modified_date: Optional[datetime] = None
+    modified_date: Optional[datetime] = Field(default_factory=datetime.now)
 
     images: List[Image] = Relationship(back_populates="collections", link_model=ImageCollectionLink)

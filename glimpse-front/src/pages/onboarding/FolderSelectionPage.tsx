@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { useApp } from "@/contexts/AppContext";
+import { useFolders, useAddFolder, useRemoveFolder } from "@/hooks/api/useFolders";
 import { useState } from "react";
 
 const SAMPLE_PATHS = [
@@ -13,7 +14,10 @@ const SAMPLE_PATHS = [
 ];
 
 export default function FolderSelectionPage() {
-  const { folders, addFolder, removeFolder, setOnboardingStep, startIndexing } = useApp();
+  const { setOnboardingStep, startIndexing } = useApp();
+  const { data: folders = [] } = useFolders();
+  const { mutate: addFolder } = useAddFolder();
+  const { mutate: removeFolder } = useRemoveFolder();
   const [includeSubfolders, setIncludeSubfolders] = useState(true);
   const [pathIdx, setPathIdx] = useState(0);
 

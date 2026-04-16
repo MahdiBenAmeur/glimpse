@@ -1,10 +1,11 @@
 import { Bookmark, Play, Edit2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useApp } from "@/contexts/AppContext";
+import { useSavedSearches, useDeleteSavedSearch } from "@/hooks/api/useSavedSearches";
 import { useNavigate } from "react-router-dom";
 
 export default function SavedSearchesPage() {
-  const { savedSearches, deleteSavedSearch } = useApp();
+  const { data: savedSearches = [] } = useSavedSearches();
+  const { mutate: deleteSavedSearch } = useDeleteSavedSearch();
   const navigate = useNavigate();
 
   return (

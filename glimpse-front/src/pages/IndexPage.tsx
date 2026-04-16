@@ -2,9 +2,14 @@ import { Database, FolderOpen, Users, Image, Clock, HardDrive, RefreshCw, Plus, 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useApp } from "@/contexts/AppContext";
+import { useFolders, useRemoveFolder } from "@/hooks/api/useFolders";
+import { usePeople } from "@/hooks/api/usePeople";
 
 export default function IndexPage() {
-  const { folders, activeModel, lastIndexedTime, totalIndexedImages, people, indexingStatus, startIndexing, removeFolder } = useApp();
+  const { activeModel, lastIndexedTime, totalIndexedImages, indexingStatus, startIndexing } = useApp();
+  const { data: folders = [] } = useFolders();
+  const { data: people = [] } = usePeople();
+  const { mutate: removeFolder } = useRemoveFolder();
 
   const isIndexing = indexingStatus.phase !== "idle" && indexingStatus.phase !== "complete";
 

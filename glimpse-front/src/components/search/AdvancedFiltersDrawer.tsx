@@ -6,7 +6,8 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { X, Upload } from "lucide-react";
-import { useApp } from "@/contexts/AppContext";
+import { useFolders } from "@/hooks/api/useFolders";
+import { usePeople } from "@/hooks/api/usePeople";
 
 interface Props {
   open: boolean;
@@ -15,7 +16,8 @@ interface Props {
 }
 
 export function AdvancedFiltersDrawer({ open, onOpenChange, onApply }: Props) {
-  const { folders, people } = useApp();
+  const { data: folders = [] } = useFolders();
+  const { data: people = [] } = usePeople();
   const [selectedFolders, setSelectedFolders] = useState<string[]>([]);
   const [dateRange, setDateRange] = useState("any");
   const [facePresence, setFacePresence] = useState("any");

@@ -1,5 +1,5 @@
 import { Heart, Users } from "lucide-react";
-import { useApp } from "@/contexts/AppContext";
+import { useToggleFavorite } from "@/hooks/api/useImages";
 import type { ImageResult } from "@/data/mockData";
 import { useState } from "react";
 import { ImageViewer } from "@/components/ImageViewer";
@@ -9,7 +9,7 @@ interface Props {
 }
 
 export function ResultsGrid({ images }: Props) {
-  const { toggleFavorite } = useApp();
+  const { mutate: toggleFavorite } = useToggleFavorite();
   const [viewerImage, setViewerImage] = useState<ImageResult | null>(null);
   const [viewerIdx, setViewerIdx] = useState(0);
 
@@ -39,7 +39,7 @@ export function ResultsGrid({ images }: Props) {
             <div className="absolute inset-0 bg-foreground/0 group-hover:bg-foreground/10 transition-colors" />
             <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
               <button
-                onClick={(e) => { e.stopPropagation(); toggleFavorite(img.id); }}
+                onClick={(e) => { e.stopPropagation(); toggleFavorite({ id: img.id, isFav: !img.isFavorite }); }}
                 className="w-7 h-7 rounded-full bg-card/80 backdrop-blur flex items-center justify-center hover:bg-card"
               >
                 <Heart className={`w-3.5 h-3.5 ${img.isFavorite ? "fill-destructive text-destructive" : "text-foreground"}`} />

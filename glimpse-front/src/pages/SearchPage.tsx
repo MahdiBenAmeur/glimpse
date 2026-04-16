@@ -4,12 +4,14 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useApp } from "@/contexts/AppContext";
+import { useImages } from "@/hooks/api/useImages";
 import { EXAMPLE_SEARCHES } from "@/data/mockData";
 import { ResultsGrid } from "@/components/search/ResultsGrid";
 import { AdvancedFiltersDrawer } from "@/components/search/AdvancedFiltersDrawer";
 
 export default function SearchPage() {
-  const { images, activeModel, lastIndexedTime, indexingStatus } = useApp();
+  const { activeModel, lastIndexedTime, indexingStatus } = useApp();
+  const { data: images = [] } = useImages();
   const [query, setQuery] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
   const [isSearching, setIsSearching] = useState(false);

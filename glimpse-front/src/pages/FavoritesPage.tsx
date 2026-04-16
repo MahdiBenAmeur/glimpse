@@ -1,11 +1,11 @@
 import { Heart } from "lucide-react";
-import { useApp } from "@/contexts/AppContext";
+import { useImages } from "@/hooks/api/useImages";
 import { ResultsGrid } from "@/components/search/ResultsGrid";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 
 export default function FavoritesPage() {
-  const { images } = useApp();
+  const { data: images = [] } = useImages();
   const navigate = useNavigate();
   const favorites = images.filter(img => img.isFavorite);
 

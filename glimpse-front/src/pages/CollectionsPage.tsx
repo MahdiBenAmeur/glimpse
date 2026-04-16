@@ -1,19 +1,24 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, FolderOpen, Trash2, Edit2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useApp } from "@/contexts/AppContext";
+import { useCollectionContext } from "@/contexts/CollectionContext";
 import { useNavigate } from "react-router-dom";
+import { DialogDescription } from "@radix-ui/react-dialog";
 
 export default function CollectionsPage() {
-  const { collections, createCollection, deleteCollection } = useApp();
+  const { collections, createCollection } = useCollectionContext();
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
+
+  useEffect(() => {
+    console.log(collections);
+  }, [collections]);
 
   const handleCreate = () => {
     if (newName.trim()) {
@@ -38,7 +43,6 @@ export default function CollectionsPage() {
           <FolderOpen className="w-12 h-12 text-muted-foreground/30 mb-4" />
           <h2 className="text-lg font-medium text-foreground mb-1">No collections yet</h2>
           <p className="text-sm text-muted-foreground mb-4">Create a collection to organize your photos.</p>
-          <Button variant="outline" size="sm" onClick={() => setCreateOpen(true)}>Create collection</Button>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -67,6 +71,9 @@ export default function CollectionsPage() {
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle className="text-base">New Collection</DialogTitle>
+            <DialogDescription className="text-xs">
+              Fill in the details below to create a new collection.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div>

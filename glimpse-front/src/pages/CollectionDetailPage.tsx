@@ -1,13 +1,16 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Edit2, Trash2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useApp } from "@/contexts/AppContext";
+import { useCollections, useDeleteCollection } from "@/hooks/api/useCollections";
+import { useImages } from "@/hooks/api/useImages";
 import { ResultsGrid } from "@/components/search/ResultsGrid";
 
 export default function CollectionDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { collections, images, deleteCollection } = useApp();
+  const { data: collections = [] } = useCollections();
+  const { data: images = [] } = useImages();
+  const { mutate: deleteCollection } = useDeleteCollection();
   const collection = collections.find(c => c.id === id);
 
   if (!collection) {
