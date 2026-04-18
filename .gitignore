@@ -3,6 +3,7 @@ main.ipynb
 main.py
 search_config.json
 glimpse-front/node_modules
+electron/node_modules
 __pycache__
 desktopvenv
 backend/data/cache_dir
@@ -11,3 +12,4 @@ test_images
 backend/data/face_vector_store
 backend/data/image_vector_store
 backend/data/person_vector_store
+hello
