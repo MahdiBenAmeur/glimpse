@@ -14,3 +14,4 @@ backend/data/person_vector_store
 backend/data/thumbnails
 face_test.py
 test.py
+electron/node_modules
