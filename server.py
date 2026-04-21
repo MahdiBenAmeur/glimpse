@@ -49,8 +49,8 @@ app.include_router(saved_searches_router, prefix="/api")
 app.include_router(search_router, prefix="/api")
 
 @app.get("/")
-def read_root():
-    return {"message": "Welcome to Glimpse API"}
+def root():
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":

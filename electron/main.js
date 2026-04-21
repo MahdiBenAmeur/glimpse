@@ -19,6 +19,29 @@ function startBackend() {
     backendProcess.stderr.on('data', d => console.error(`[FASTAPI ERROR]: ${d}`))
 }
 
+const BACKEND_URL = 'http://127.0.0.1:8000'
+
+// ⏳ Wait for FastAPI
+function waitForBackend(callback) {
+    const maxAttempts = 50
+    let attempts = 0
+
+    const interval = setInterval(() => {
+        attempts++
+
+        http.get(BACKEND_URL, () => {
+            clearInterval(interval)
+            console.log('✅ Backend ready')
+            callback()
+        }).on('error', () => {
+            if (attempts >= maxAttempts) {
+                clearInterval(interval)
+                console.error('❌ Backend did not start in time')
+            }
+        })
+    }, 500)
+}
+
 // ⚛️ Start Vite
 function startVite() {
     viteProcess = spawn('npm', ['run', 'dev'], {
@@ -87,10 +110,17 @@ function killProcessTree(pid) {
 // 🚀 App ready
 app.whenReady().then(() => {
     startBackend()
-    startVite()
 
-    waitForFrontend(() => {
-        createWindow()
+    // ⏳ Wait for backend FIRST
+    waitForBackend(() => {
+
+        // ⚛️ Then start frontend
+        startVite()
+
+        // ⏳ Then wait for frontend
+        waitForFrontend(() => {
+            createWindow()
+        })
     })
 })
 
