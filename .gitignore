@@ -11,3 +11,6 @@ test_images
 backend/data/face_vector_store
 backend/data/image_vector_store
 backend/data/person_vector_store
+backend/data/thumbnails
+face_test.py
+test.py

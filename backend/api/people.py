@@ -33,15 +33,24 @@ def create_person(person_in: PersonCreate, session: Session = Depends(get_sessio
     return PersonService.create(session=session, person_in=person_in)
 
 @router.get("/")
-def read_people(request: Request, skip: int = 0, limit: int = 100):
+def read_people(request: Request, skip: int = 0, limit: int | None = None):
     _, person_meta_data = load_person_vector_store()
     people: list[dict[str, Any]] = []
     for key, entry in person_meta_data.items():
         if str(key).startswith("_") or not isinstance(entry, dict):
             continue
         people.append(_build_person_response(int(key), entry, request))
-    people.sort(key=lambda item: ((item["name"] or "").lower(), -item["imageCount"], item["id"]))
-    return people[skip : skip + limit]
+    # Keep named people first so renaming a person makes them easier to find,
+    # and avoid silently dropping them behind a low default page size.
+    people.sort(
+        key=lambda item: (
+            0 if item["name"] else 1,
+            (item["name"] or "").lower(),
+            -item["imageCount"],
+            item["id"],
+        )
+    )
+    return people[skip:] if limit is None else people[skip : skip + limit]
 
 @router.get("/{person_id}")
 def read_person(person_id: int, request: Request):

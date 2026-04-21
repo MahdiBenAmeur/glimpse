@@ -207,6 +207,7 @@ def run_search(payload: SearchRequest, request: Request) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
+        print(exc)
         raise HTTPException(status_code=500, detail=f"Search failed: {exc}") from exc
 
     people_lookup = _build_people_lookup()

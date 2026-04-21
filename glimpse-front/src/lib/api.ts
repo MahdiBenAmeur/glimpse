@@ -335,8 +335,8 @@ export async function openImageExternally(imageId: string | number): Promise<voi
   });
 }
 
-export async function getPeople(): Promise<PersonInfo[]> {
-  return (await apiRequest<any[]>("/api/people/")).map(mapPerson);
+export async function getPeople(limit = 1000): Promise<PersonInfo[]> {
+  return (await apiRequest<any[]>(`/api/people/?limit=${limit}`)).map(mapPerson);
 }
 
 export async function renamePerson(personId: string, name: string): Promise<void> {
