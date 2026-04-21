@@ -30,6 +30,9 @@ router = APIRouter(prefix="/index", tags=["index"])
 
 IndexPhase = Literal["idle", "scanning", "embeddings", "faces", "thumbnails", "writing", "complete"]
 MODEL_STATE_PATH = Path("backend/data/model_state.json")
+DEFAULT_INDEX_BATCH_SIZE = 32
+QWEN_INDEX_BATCH_SIZE = 8
+QWEN_MODEL_ID = "qwen-vl-embedding-2b"
 
 
 class ModelInfo(BaseModel):
@@ -70,7 +73,7 @@ class StartIndexRequest(BaseModel):
     folderIds: list[int] = Field(default_factory=list)
     modelId: str | None = None
     recursive: bool = True
-    batchSize: int = Field(default=32, ge=1, le=512)
+    batchSize: int | None = Field(default=None, ge=1, le=512)
     resetIndex: bool = True
 
 
@@ -111,7 +114,7 @@ MODEL_CATALOG: list[dict[str, Any]] = [
         "factory": SiglipEmbeddingModel,
     },
     {
-        "id": "qwen-vl-embedding-2b",
+        "id": QWEN_MODEL_ID,
         "name": "Qwen VL Embedding 2B",
         "description": "Best semantic understanding, but heavier to run locally.",
         "quality": "best",
@@ -169,6 +172,10 @@ def get_model_catalog() -> list[dict[str, Any]]:
 
 def get_active_model_id() -> str | None:
     return _active_model_id
+
+
+def _default_batch_size_for_model(model_id: str | None) -> int:
+    return QWEN_INDEX_BATCH_SIZE if model_id == QWEN_MODEL_ID else DEFAULT_INDEX_BATCH_SIZE
 
 
 def get_embedding_model(model_id: str | None = None) -> BaseEmbeddingModel:
@@ -597,6 +604,8 @@ def start_indexing(payload: StartIndexRequest, session: Session = Depends(get_se
     elif _active_model_id is None:
         raise HTTPException(status_code=400, detail="Select a model before indexing")
 
+    resolved_batch_size = payload.batchSize if payload.batchSize is not None else _default_batch_size_for_model(_active_model_id)
+
     _set_state(
         phase="scanning",
         progress=0,
@@ -614,7 +623,7 @@ def start_indexing(payload: StartIndexRequest, session: Session = Depends(get_se
         kwargs={
             "folder_paths": folder_paths,
             "model_id": _active_model_id,
-            "batch_size": payload.batchSize,
+            "batch_size": resolved_batch_size,
             "recursive": payload.recursive,
             "reset_index": payload.resetIndex,
         },

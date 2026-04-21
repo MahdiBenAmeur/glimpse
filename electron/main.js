@@ -2,26 +2,40 @@ const { app, BrowserWindow } = require('electron')
 const { spawn } = require('child_process')
 const path = require('path')
 const http = require('http')
+const fs = require('fs')
 
 let mainWindow
 let backendProcess
 let viteProcess
 
 const FRONTEND_URL = 'http://localhost:8080'
+const BACKEND_URL = 'http://127.0.0.1:8000'
 
-// 🔥 Start FastAPI
+function resolvePythonCommand() {
+    const projectVenvPython = path.join(__dirname, '../desktopvenv/Scripts/python.exe')
+    const inheritedVenvPython = process.env.VIRTUAL_ENV
+        ? path.join(process.env.VIRTUAL_ENV, 'Scripts', 'python.exe')
+        : null
+
+    return process.env.BACKEND_PYTHON
+        || (fs.existsSync(projectVenvPython) ? projectVenvPython : null)
+        || (inheritedVenvPython && fs.existsSync(inheritedVenvPython) ? inheritedVenvPython : null)
+        || 'python'
+}
+
+// Start FastAPI
 function startBackend() {
-    backendProcess = spawn('python', [
+    backendProcess = spawn(resolvePythonCommand(), [
         path.join(__dirname, '../server.py')
-    ], { shell: true })
+    ], {
+        cwd: path.join(__dirname, '..'),
+        shell: false
+    })
 
     backendProcess.stdout.on('data', d => console.log(`[FASTAPI]: ${d}`))
     backendProcess.stderr.on('data', d => console.error(`[FASTAPI ERROR]: ${d}`))
 }
 
-const BACKEND_URL = 'http://127.0.0.1:8000'
-
-// ⏳ Wait for FastAPI
 function waitForBackend(callback) {
     const maxAttempts = 50
     let attempts = 0
@@ -31,29 +45,35 @@ function waitForBackend(callback) {
 
         http.get(BACKEND_URL, () => {
             clearInterval(interval)
-            console.log('✅ Backend ready')
+            console.log('Backend ready')
             callback()
         }).on('error', () => {
             if (attempts >= maxAttempts) {
                 clearInterval(interval)
-                console.error('❌ Backend did not start in time')
+                console.error('Backend did not start in time')
             }
         })
     }, 500)
 }
 
-// ⚛️ Start Vite
+// Start Vite
 function startVite() {
-    viteProcess = spawn('npm', ['run', 'dev'], {
-        cwd: path.join(__dirname, '../glimpse-front'),
-        shell: true
-    })
+    if (process.platform === 'win32') {
+        viteProcess = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'npm run dev'], {
+            cwd: path.join(__dirname, '../glimpse-front'),
+            shell: false
+        })
+    } else {
+        viteProcess = spawn('npm', ['run', 'dev'], {
+            cwd: path.join(__dirname, '../glimpse-front'),
+            shell: false
+        })
+    }
 
     viteProcess.stdout.on('data', d => console.log(`[VITE]: ${d}`))
     viteProcess.stderr.on('data', d => console.error(`[VITE ERROR]: ${d}`))
 }
 
-// ⏳ Wait for Vite server
 function waitForFrontend(callback) {
     const maxAttempts = 50
     let attempts = 0
@@ -67,13 +87,13 @@ function waitForFrontend(callback) {
         }).on('error', () => {
             if (attempts >= maxAttempts) {
                 clearInterval(interval)
-                console.error('❌ Vite did not start in time')
+                console.error('Vite did not start in time')
             }
         })
     }, 500)
 }
 
-// 🪟 Create window
+// Create window
 function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1200,
@@ -84,7 +104,6 @@ function createWindow() {
         titleBarOverlay: {
             color: 'rgba(0, 0, 0, 0)',
             symbolColor: '#000000ff',
-
             height: 30
         }
     })
@@ -94,7 +113,7 @@ function createWindow() {
 
 const { exec } = require('child_process')
 
-// 🧨 Kill process tree (important for Windows)
+// Kill process tree (important for Windows)
 function killProcessTree(pid) {
     if (!pid) return
 
@@ -107,29 +126,28 @@ function killProcessTree(pid) {
     }
 }
 
-// 🚀 App ready
+// App ready
 app.whenReady().then(() => {
     startBackend()
 
-    // ⏳ Wait for backend FIRST
+    // Wait for backend FIRST
     waitForBackend(() => {
-
-        // ⚛️ Then start frontend
+        // Then start frontend
         startVite()
 
-        // ⏳ Then wait for frontend
+        // Then wait for frontend
         waitForFrontend(() => {
             createWindow()
         })
     })
 })
 
-// ❗ Ensure app quits when window is closed
+// Ensure app quits when window is closed
 app.on('window-all-closed', () => {
     app.quit()
 })
 
-// 🛑 Cleanup (this WILL now run)
+// Cleanup
 app.on('will-quit', () => {
     if (backendProcess) killProcessTree(backendProcess.pid)
     if (viteProcess) killProcessTree(viteProcess.pid)

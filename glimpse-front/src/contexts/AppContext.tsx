@@ -344,7 +344,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             folderPaths: currentFolders,
             modelId: id,
             recursive: true,
-            batchSize: 32,
+            batchSize: api.getDefaultIndexBatchSize(id),
             resetIndex: true,
           });
 
@@ -431,7 +431,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         folderIds: nextFolderIds,
         modelId: nextModelId,
         recursive: options?.recursive ?? true,
-        batchSize: options?.batchSize ?? 32,
+        batchSize: options?.batchSize ?? api.getDefaultIndexBatchSize(nextModelId),
         resetIndex: options?.resetIndex ?? true,
       });
 
