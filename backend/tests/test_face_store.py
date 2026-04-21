@@ -145,6 +145,36 @@ class FaceStoreTests(unittest.TestCase):
         self.assertEqual(len(person_ids), 1)
         self.assertEqual(len(face_person_ids), 1)
 
+    def test_finalize_face_clusters_uses_centroid_and_top_faces(self):
+        self._seed_person(
+            0,
+            [_vector(1.0, 0.0, 0.0), _vector(0.98, 0.2, 0.0), _vector(0.95, 0.27, 0.0)],
+            prefix="self-clear",
+        )
+        self._seed_person(
+            1,
+            [_vector(0.97, 0.24, 0.0), _vector(0.96, 0.28, 0.0), _vector(0.94, 0.33, 0.0)],
+            prefix="self-duplicate",
+        )
+        self._seed_person(
+            2,
+            [_vector(-1.0, 0.0, 0.0), _vector(-0.98, 0.18, 0.0)],
+            prefix="other-person",
+        )
+
+        merge_stats = store.finalize_face_clusters()
+
+        person_ids = sorted(int(key) for key in store.person_meta_data.keys() if not str(key).startswith("_"))
+        face_person_ids = {
+            int(entry["person_id"])
+            for key, entry in store.face_meta_data.items()
+            if not str(key).startswith("_")
+        }
+
+        self.assertEqual(merge_stats["merged_person_count"], 1)
+        self.assertEqual(person_ids, [0, 2])
+        self.assertEqual(face_person_ids, {0, 2})
+
 
 if __name__ == "__main__":
     unittest.main()

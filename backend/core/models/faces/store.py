@@ -11,10 +11,14 @@ import torch
 from backend.config import (
     FACE_ASSIGNMENT_TOP_K,
     FACE_BATCH_CLUSTER_THRESHOLD,
+    FACE_FINAL_MERGE_AVG_EXEMPLAR_THRESHOLD,
+    FACE_FINAL_MERGE_CENTROID_THRESHOLD,
+    FACE_FINAL_MERGE_EXEMPLAR_THRESHOLD,
     FACE_MERGE_THRESHOLD,
     FACE_POST_MERGE_THRESHOLD,
     FACE_QUALITY_REFERENCE_PIXELS,
     FACE_STRONG_MATCH_THRESHOLD,
+    FACE_TOP_EXEMPLAR_COUNT,
     FACE_VS_PATH,
     PERSON_VS_PATH,
 )
@@ -100,6 +104,75 @@ def _make_face_sample(
         "created_at": created_at,
         "quality_score": _face_quality_weight(face_box),
     }
+
+
+def _make_top_face_entry(sample: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "embedding": sample["embedding"].tolist(),
+        "quality_score": float(sample["quality_score"]),
+        "image_path": sample["image_path"],
+        "face_box": list(sample["face_box"]),
+        "created_at": sample["created_at"],
+    }
+
+
+def _normalize_top_face_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(entry, dict):
+        return None
+
+    embedding = entry.get("embedding")
+    if not isinstance(embedding, list) or len(embedding) != face_emb_dim:
+        return None
+
+    return {
+        "embedding": _normalize_embedding(torch.tensor(embedding, dtype=torch.float32)).tolist(),
+        "quality_score": float(entry.get("quality_score", 1.0)),
+        "image_path": str(entry.get("image_path", "")),
+        "face_box": [float(value) for value in entry.get("face_box", [])],
+        "created_at": entry.get("created_at"),
+    }
+
+
+def _trim_top_faces(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized_entries = []
+    seen: set[tuple[str, tuple[float, ...]]] = set()
+
+    for entry in entries:
+        normalized_entry = _normalize_top_face_entry(entry)
+        if normalized_entry is None:
+            continue
+
+        dedupe_key = (
+            normalized_entry.get("image_path", ""),
+            tuple(round(float(value), 4) for value in normalized_entry.get("face_box", [])),
+        )
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        normalized_entries.append(normalized_entry)
+
+    normalized_entries.sort(key=lambda entry: float(entry["quality_score"]), reverse=True)
+    return normalized_entries[:FACE_TOP_EXEMPLAR_COUNT]
+
+
+def _top_face_entries_from_samples(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return _trim_top_faces([_make_top_face_entry(sample) for sample in samples])
+
+
+def _top_face_embeddings(entry: dict[str, Any]) -> list[torch.Tensor]:
+    top_faces = entry.get("_top_faces", [])
+    embeddings = []
+    if isinstance(top_faces, list):
+        for top_face in top_faces:
+            normalized_entry = _normalize_top_face_entry(top_face)
+            if normalized_entry is None:
+                continue
+            embeddings.append(torch.tensor(normalized_entry["embedding"], dtype=torch.float32))
+
+    if embeddings:
+        return embeddings
+
+    return [torch.tensor(entry["centroid"], dtype=torch.float32)]
 
 
 def _flatten_face_samples(
@@ -199,6 +272,19 @@ def _ensure_person_state(entry: dict[str, Any]) -> dict[str, Any]:
     entry["quality_scores"] = quality_scores[:target_len]
     entry["centroid"] = centroid.tolist()
     entry["count"] = target_len
+    if not isinstance(entry.get("_top_faces"), list):
+        entry["_top_faces"] = []
+    entry["_top_faces"] = _trim_top_faces(entry["_top_faces"])
+    if not entry["_top_faces"]:
+        entry["_top_faces"] = [
+            {
+                "embedding": centroid.tolist(),
+                "quality_score": max(quality_scores) if quality_scores else 1.0,
+                "image_path": image_paths[0] if image_paths else "",
+                "face_box": list(face_boxes[0]) if face_boxes else [],
+                "created_at": entry.get("image_created_ats", [None])[0] if entry.get("image_created_ats") else None,
+            }
+        ]
     return entry
 
 
@@ -213,6 +299,7 @@ def _person_entry_from_cluster(cluster: dict[str, Any]) -> dict[str, Any]:
         "quality_scores": [float(sample["quality_score"]) for sample in samples],
         "_embedding_sum": cluster["embedding_sum"].tolist(),
         "_total_weight": float(cluster["total_weight"]),
+        "_top_faces": _top_face_entries_from_samples(samples),
     }
 
 
@@ -247,6 +334,7 @@ def _merge_cluster_into_person(person_id: int, cluster: dict[str, Any], person_m
     person_entry.setdefault("image_created_ats", []).extend(sample["created_at"] for sample in cluster["samples"])
     person_entry.setdefault("face_boxes", []).extend(sample["face_box"] for sample in cluster["samples"])
     person_entry.setdefault("quality_scores", []).extend(float(sample["quality_score"]) for sample in cluster["samples"])
+    person_entry["_top_faces"] = _trim_top_faces(person_entry.get("_top_faces", []) + _top_face_entries_from_samples(cluster["samples"]))
     person_entry["count"] = len(person_entry["image_paths"])
 
     person_vs.remove_ids(np.array([person_id], dtype=np.int64))
@@ -397,6 +485,7 @@ def _merge_person_entries(target_id: int, source_id: int, person_meta_data: dict
     target_entry.setdefault("image_created_ats", []).extend(source_entry.get("image_created_ats", []))
     target_entry.setdefault("face_boxes", []).extend(source_entry.get("face_boxes", []))
     target_entry.setdefault("quality_scores", []).extend(source_entry.get("quality_scores", []))
+    target_entry["_top_faces"] = _trim_top_faces(target_entry.get("_top_faces", []) + source_entry.get("_top_faces", []))
     if not target_entry.get("name") and source_entry.get("name"):
         target_entry["name"] = source_entry["name"]
     target_entry["count"] = len(target_entry["image_paths"])
@@ -450,6 +539,143 @@ def _merge_duplicate_people(face_meta_data: dict[str, Any], person_meta_data: di
         "merged_person_count": len(merged_pairs),
         "merged_person_ids": merged_person_ids,
     }
+
+
+def _collect_final_merge_candidate_ids(person_id: int, person_meta_data: dict[str, Any]) -> list[int]:
+    person_entry = _ensure_person_state(person_meta_data[str(person_id)])
+    query_embeddings = [torch.tensor(person_entry["centroid"], dtype=torch.float32), *_top_face_embeddings(person_entry)]
+    candidate_ids: set[int] = set()
+
+    person_vector_store, _ = load_person_vector_store()
+    if person_vector_store.ntotal == 0:
+        return []
+
+    search_k = min(max(FACE_ASSIGNMENT_TOP_K * 2, 8), int(person_vector_store.ntotal))
+    for query_embedding in query_embeddings:
+        scores, ids = person_vector_store.search(embedding_row(_normalize_embedding(query_embedding)), k=search_k)
+        for score, candidate_id in zip(scores[0], ids[0]):
+            resolved_candidate_id = int(candidate_id)
+            if resolved_candidate_id < 0 or resolved_candidate_id == person_id:
+                continue
+            if float(score) < FACE_MERGE_THRESHOLD:
+                continue
+            candidate_ids.add(resolved_candidate_id)
+
+    return sorted(candidate_ids)
+
+
+def _best_match_average(source_embeddings: list[torch.Tensor], target_embeddings: list[torch.Tensor]) -> float:
+    if not source_embeddings or not target_embeddings:
+        return float("-inf")
+
+    best_scores = []
+    for source_embedding in source_embeddings:
+        best_scores.append(max(float(torch.dot(source_embedding, target_embedding)) for target_embedding in target_embeddings))
+    return sum(best_scores) / len(best_scores)
+
+
+def _compare_person_entries(person_a: int, person_b: int, person_meta_data: dict[str, Any]) -> dict[str, Any]:
+    entry_a = _ensure_person_state(person_meta_data[str(person_a)])
+    entry_b = _ensure_person_state(person_meta_data[str(person_b)])
+
+    centroid_a = torch.tensor(entry_a["centroid"], dtype=torch.float32)
+    centroid_b = torch.tensor(entry_b["centroid"], dtype=torch.float32)
+    top_faces_a = _top_face_embeddings(entry_a)
+    top_faces_b = _top_face_embeddings(entry_b)
+
+    pair_scores = [
+        float(torch.dot(face_a, face_b))
+        for face_a in top_faces_a
+        for face_b in top_faces_b
+    ]
+    best_exemplar_score = max(pair_scores) if pair_scores else float("-inf")
+    avg_exemplar_score = (
+        _best_match_average(top_faces_a, top_faces_b) + _best_match_average(top_faces_b, top_faces_a)
+    ) / 2.0
+    centroid_score = float(torch.dot(centroid_a, centroid_b))
+    combined_score = (centroid_score + best_exemplar_score + avg_exemplar_score) / 3.0
+
+    return {
+        "person_id": person_b,
+        "centroid_score": centroid_score,
+        "best_exemplar_score": best_exemplar_score,
+        "avg_exemplar_score": avg_exemplar_score,
+        "combined_score": combined_score,
+    }
+
+
+def _should_merge_people_final(candidate: dict[str, Any] | None) -> bool:
+    if candidate is None:
+        return False
+    if candidate["centroid_score"] < FACE_FINAL_MERGE_CENTROID_THRESHOLD:
+        return False
+    return (
+        candidate["best_exemplar_score"] >= FACE_FINAL_MERGE_EXEMPLAR_THRESHOLD
+        or candidate["avg_exemplar_score"] >= FACE_FINAL_MERGE_AVG_EXEMPLAR_THRESHOLD
+    )
+
+
+def finalize_face_clusters() -> dict[str, Any]:
+    face_vector_store, face_store_meta_data = load_face_vector_store()
+    person_vector_store, person_store_meta_data = load_person_vector_store()
+    stats = {
+        "merged_person_count": 0,
+        "merged_person_ids": [],
+        "person_store_total": int(person_vector_store.ntotal),
+        "face_store_total": int(face_vector_store.ntotal),
+    }
+
+    if person_vector_store.ntotal <= 1:
+        return stats
+
+    _rebuild_person_index(person_store_meta_data)
+    merged_pairs: list[tuple[int, int]] = []
+
+    while True:
+        person_ids = sorted(int(key) for key in person_store_meta_data.keys() if not str(key).startswith("_"))
+        did_merge = False
+
+        for person_id in person_ids:
+            if str(person_id) not in person_store_meta_data:
+                continue
+
+            candidate_metrics = [
+                _compare_person_entries(person_id, candidate_id, person_store_meta_data)
+                for candidate_id in _collect_final_merge_candidate_ids(person_id, person_store_meta_data)
+                if str(candidate_id) in person_store_meta_data
+            ]
+            candidate_metrics.sort(
+                key=lambda candidate: (
+                    candidate["combined_score"],
+                    candidate["best_exemplar_score"],
+                    candidate["avg_exemplar_score"],
+                    candidate["centroid_score"],
+                ),
+                reverse=True,
+            )
+
+            best_candidate = candidate_metrics[0] if candidate_metrics else None
+            if not _should_merge_people_final(best_candidate):
+                continue
+
+            winner_id, loser_id = _preferred_merge_pair(person_id, int(best_candidate["person_id"]), person_store_meta_data)
+            if str(loser_id) not in person_store_meta_data:
+                continue
+
+            _merge_person_entries(winner_id, loser_id, person_store_meta_data, face_store_meta_data)
+            _rebuild_person_index(person_store_meta_data)
+            merged_pairs.append((winner_id, loser_id))
+            did_merge = True
+            break
+
+        if not did_merge:
+            break
+
+    stats["merged_person_count"] = len(merged_pairs)
+    stats["merged_person_ids"] = sorted({winner_id for winner_id, _ in merged_pairs})
+    stats["person_store_total"] = int(load_person_vector_store()[0].ntotal)
+    stats["face_store_total"] = int(load_face_vector_store()[0].ntotal)
+    return stats
 
 
 def add_faces_to_vector_store(

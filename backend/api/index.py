@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 
 from backend.config import FACE_VS_PATH, IMAGE_VS_PATH, PERSON_VS_PATH
 from backend.core.indexing.index import index_batch
-from backend.core.models.faces.store import reset_face_vector_stores, save_face_vector_stores
+from backend.core.models.faces.store import finalize_face_clusters, reset_face_vector_stores, save_face_vector_stores
 from backend.core.models.vision_language.base import BaseEmbeddingModel
 from backend.core.models.vision_language.clip import ClipEmbeddingModel
 from backend.core.models.vision_language.qwen import QwenEmbeddingModel
@@ -426,6 +426,7 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
                 session.add(folder_record)
                 session.commit()
 
+        final_face_merge_stats = finalize_face_clusters()
         save_image_vector_store()
         save_face_vector_stores()
 
@@ -441,6 +442,7 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
             error=None,
             lastIndexedTime=completed_at,
             totalIndexedImages=_count_store_records(IMAGE_VS_PATH),
+            mergedPeople=int(final_face_merge_stats.get("merged_person_count", 0)),
         )
     except Exception as exc:
         _set_state(

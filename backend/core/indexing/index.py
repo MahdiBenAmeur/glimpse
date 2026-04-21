@@ -5,7 +5,7 @@ from backend.core.indexing.index_faces import index_face_batch
 from backend.core.indexing.index_images import index_image_batch
 from backend.core.models.faces.detector import load_face_detector
 from backend.core.models.faces.embedding import load_face_embedding_model
-from backend.core.models.faces.store import save_face_vector_stores
+from backend.core.models.faces.store import finalize_face_clusters, save_face_vector_stores
 from backend.core.models.vision_language.base import BaseEmbeddingModel
 from backend.core.models.vision_language.store import save_image_vector_store
 from backend.services.library_state_service import load_image_meta_data
@@ -178,6 +178,7 @@ def index_folder(
         print(f"Completed batch {batch_index}/{stats['batch_count']} - {stats['completion_percent']}% complete")
         print(f"Batch stats: {batch_stats}")
 
+    finalize_face_clusters()
     save_image_vector_store()
     save_face_vector_stores()
     return stats
