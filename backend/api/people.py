@@ -107,10 +107,15 @@ def read_person_face(person_id: int):
 
     image_paths = entry.get("image_paths", [])
     face_boxes = entry.get("face_boxes", [])
+    quality_scores = entry.get("quality_scores", [])
     if not image_paths:
         raise HTTPException(status_code=404, detail="Face image not available")
 
-    image_path = Path(image_paths[0])
+    best_index = 0
+    if quality_scores:
+        best_index = max(range(len(quality_scores)), key=lambda index: float(quality_scores[index]))
+
+    image_path = Path(image_paths[best_index if best_index < len(image_paths) else 0])
     if not image_path.exists():
         raise HTTPException(status_code=404, detail="Face source image not found")
 
@@ -120,7 +125,8 @@ def read_person_face(person_id: int):
         with Image.open(image_path) as image:
             image = image.convert("RGB")
             if face_boxes:
-                left, top, right, bottom = [int(value) for value in face_boxes[0]]
+                face_box = face_boxes[best_index] if best_index < len(face_boxes) else face_boxes[0]
+                left, top, right, bottom = [int(value) for value in face_box]
                 image = image.crop((left, top, right, bottom))
             output = io.BytesIO()
             image.save(output, format="JPEG")

@@ -322,7 +322,11 @@ def search_by_person_id(person_id: int) -> dict:
     if person_entry is None:
         raise KeyError(f"Person id not found: {person_id}")
 
-    return {key: value for key, value in person_entry.items() if key != "centroid"}
+    return {
+        key: value
+        for key, value in person_entry.items()
+        if key != "centroid" and not str(key).startswith("_")
+    }
 
 
 def global_search(

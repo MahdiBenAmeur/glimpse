@@ -16,5 +16,4 @@ backend/data/thumbnails
 face_test.py
 test.py
 electron/node_modules
-
 hello
