@@ -7,15 +7,12 @@ let mainWindow
 let backendProcess
 let viteProcess
 
-const isDev = !app.isPackaged
-
-const BACKEND_URL = 'http://127.0.0.1:8000'
-const FRONTEND_URL = 'http://localhost:5173'
+const FRONTEND_URL = 'http://localhost:8080'
 
 // 🔥 Start FastAPI
 function startBackend() {
     backendProcess = spawn('python', [
-        path.join(__dirname, '../backend/run.py')
+        path.join(__dirname, '../backend/server.py')
     ], { shell: true })
 
     backendProcess.stdout.on('data', d => console.log(`[FASTAPI]: ${d}`))
@@ -33,13 +30,23 @@ function startVite() {
     viteProcess.stderr.on('data', d => console.error(`[VITE ERROR]: ${d}`))
 }
 
-// ⏳ Wait for Vite
+// ⏳ Wait for Vite server
 function waitForFrontend(callback) {
+    const maxAttempts = 50
+    let attempts = 0
+
     const interval = setInterval(() => {
+        attempts++
+
         http.get(FRONTEND_URL, () => {
             clearInterval(interval)
             callback()
-        }).on('error', () => { })
+        }).on('error', () => {
+            if (attempts >= maxAttempts) {
+                clearInterval(interval)
+                console.error('❌ Vite did not start in time')
+            }
+        })
     }, 500)
 }
 
@@ -47,7 +54,10 @@ function waitForFrontend(callback) {
 function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1200,
-        height: 800
+        height: 800,
+        autoHideMenuBar: true,
+        closable: true,
+        fullscreenable: true,
     })
 
     mainWindow.loadURL(FRONTEND_URL)
