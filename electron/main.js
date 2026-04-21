@@ -12,7 +12,7 @@ const FRONTEND_URL = 'http://localhost:8080'
 // 🔥 Start FastAPI
 function startBackend() {
     backendProcess = spawn('python', [
-        path.join(__dirname, '../backend/server.py')
+        path.join(__dirname, '../server.py')
     ], { shell: true })
 
     backendProcess.stdout.on('data', d => console.log(`[FASTAPI]: ${d}`))
@@ -69,6 +69,21 @@ function createWindow() {
     mainWindow.loadURL(FRONTEND_URL)
 }
 
+const { exec } = require('child_process')
+
+// 🧨 Kill process tree (important for Windows)
+function killProcessTree(pid) {
+    if (!pid) return
+
+    if (process.platform === 'win32') {
+        exec(`taskkill /PID ${pid} /T /F`)
+    } else {
+        try {
+            process.kill(-pid)
+        } catch (e) { }
+    }
+}
+
 // 🚀 App ready
 app.whenReady().then(() => {
     startBackend()
@@ -79,8 +94,13 @@ app.whenReady().then(() => {
     })
 })
 
-// 🛑 Cleanup
+// ❗ Ensure app quits when window is closed
+app.on('window-all-closed', () => {
+    app.quit()
+})
+
+// 🛑 Cleanup (this WILL now run)
 app.on('will-quit', () => {
-    if (backendProcess) backendProcess.kill()
-    if (viteProcess) viteProcess.kill()
+    if (backendProcess) killProcessTree(backendProcess.pid)
+    if (viteProcess) killProcessTree(viteProcess.pid)
 })
