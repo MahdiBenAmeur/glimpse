@@ -57,7 +57,13 @@ function createWindow() {
         height: 800,
         autoHideMenuBar: true,
         closable: true,
-        fullscreenable: true,
+        titleBarStyle: 'hidden',
+        titleBarOverlay: {
+            color: 'rgba(0, 0, 0, 0)',
+            symbolColor: '#000000ff',
+
+            height: 30
+        }
     })
 
     mainWindow.loadURL(FRONTEND_URL)
