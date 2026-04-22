@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 from typing import Sequence
 
@@ -11,6 +12,14 @@ from backend.core.models.vision_language.store import save_image_vector_store
 from backend.services.library_state_service import load_image_meta_data
 from backend.utils.image_processing import coerce_image_paths, list_image_files, prepare_images
 from backend.utils.path_utils import canonicalize_path_key
+
+
+def _log_indexing(message: str, **fields) -> None:
+    timestamp = datetime.utcnow().isoformat(timespec="seconds")
+    suffix = ""
+    if fields:
+        suffix = " | " + ", ".join(f"{key}={value!r}" for key, value in fields.items())
+    print(f"[{timestamp}] [INDEXING] {message}{suffix}", flush=True)
 
 
 def _dedupe_unindexed_paths(
@@ -54,7 +63,14 @@ def index_batch(
     save_after_batch: bool = False,
 ) -> dict:
     normalized_paths = coerce_image_paths(image_paths)
+    _log_indexing("index_batch started", input_count=len(normalized_paths), batch_size=batch_size, save_after_batch=save_after_batch)
     valid_paths, failed_items, path_2_created_at = prepare_images(normalized_paths)
+    _log_indexing(
+        "Prepared images for batch",
+        valid_count=len(valid_paths),
+        failed_count=len(failed_items),
+        first_valid=str(valid_paths[0]) if valid_paths else None,
+    )
 
     stats = {
         "input_count": len(normalized_paths),
@@ -68,18 +84,27 @@ def index_batch(
     }
 
     if not valid_paths:
+        _log_indexing("No valid paths after image preparation")
         return stats
 
     valid_paths, path_2_created_at, skipped_existing = _dedupe_unindexed_paths(valid_paths, path_2_created_at)
     stats["skipped_existing_count"] = len(skipped_existing)
     stats["skipped_existing_items"] = skipped_existing
+    _log_indexing(
+        "Deduped batch against existing index",
+        remaining_count=len(valid_paths),
+        skipped_existing_count=len(skipped_existing),
+    )
 
     if not valid_paths:
+        _log_indexing("All valid paths were already indexed")
         return stats
 
+    _log_indexing("Loading models required for batch", model_type=type(image_model).__name__)
     image_model.load_model()
     load_face_detector()
     load_face_embedding_model()
+    _log_indexing("All models loaded for batch")
 
     image_stats = index_image_batch(
         image_model,
@@ -87,11 +112,23 @@ def index_batch(
         validate_inputs=False,
         path_2_created_at=path_2_created_at,
     )
+    _log_indexing(
+        "Image indexing finished for batch",
+        indexed_count=image_stats.get("indexed_count"),
+        failed_count=image_stats.get("failed_count"),
+        store_total=image_stats.get("store_total"),
+    )
     face_stats = index_face_batch(
         valid_paths,
         embedding_batch_size=batch_size,
         validate_inputs=False,
         path_2_created_at=path_2_created_at,
+    )
+    _log_indexing(
+        "Face indexing finished for batch",
+        detected_face_count=face_stats.get("detected_face_count"),
+        indexed_face_count=face_stats.get("indexed_face_count"),
+        assigned_person_count=face_stats.get("assigned_person_count"),
     )
 
     stats["image_indexing"] = image_stats
@@ -103,7 +140,14 @@ def index_batch(
     if save_after_batch:
         save_image_vector_store()
         save_face_vector_stores()
+        _log_indexing("Saved vector stores after batch")
 
+    _log_indexing(
+        "index_batch completed",
+        processed_count=stats["processed_count"],
+        failed_count=stats["failed_count"],
+        new_people_count=stats["new_people_count"],
+    )
     return stats
 
 

@@ -47,6 +47,10 @@ class SiglipEmbeddingModel(BaseEmbeddingModel):
         return self._normalize_embeddings(_coerce_siglip_features(text_features))
 
 
+class SiglipLargeEmbeddingModel(SiglipEmbeddingModel):
+    CKPT = "google/siglip2-large-patch16-384"
+
+
 def _coerce_siglip_features(output) -> torch.Tensor:
     if isinstance(output, torch.Tensor):
         return output

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
 import math
 from pathlib import Path
+import threading
 from typing import Any
 
 import faiss
@@ -32,11 +34,34 @@ person_vs = None
 person_meta_data = None
 
 
+def _log_face_store(message: str, **fields: Any) -> None:
+    timestamp = datetime.utcnow().isoformat(timespec="seconds")
+    thread = threading.current_thread()
+    payload = {
+        "thread_name": thread.name,
+        "thread_ident": thread.ident,
+        **fields,
+    }
+    suffix = ""
+    if payload:
+        suffix = " | " + ", ".join(f"{key}={value!r}" for key, value in payload.items())
+    print(f"[{timestamp}] [FACE STORE] {message}{suffix}", flush=True)
+
+
 def reset_face_vector_stores() -> None:
     global face_vs
     global face_meta_data
     global person_vs
     global person_meta_data
+    _log_face_store(
+        "Resetting cached face stores",
+        had_face_vs=face_vs is not None,
+        had_face_meta_data=face_meta_data is not None,
+        had_person_vs=person_vs is not None,
+        had_person_meta_data=person_meta_data is not None,
+        face_vs_id=id(face_vs) if face_vs is not None else None,
+        person_vs_id=id(person_vs) if person_vs is not None else None,
+    )
     face_vs = None
     face_meta_data = None
     person_vs = None
@@ -47,9 +72,22 @@ def load_face_vector_store():
     global face_vs
     global face_meta_data
     if face_vs is not None and face_meta_data is not None:
+        _log_face_store(
+            "Returning cached face vector store",
+            ntotal=int(face_vs.ntotal),
+            metadata_entry_count=len(face_meta_data),
+            face_vs_id=id(face_vs),
+        )
         return face_vs, face_meta_data
 
+    _log_face_store("Loading face vector store from disk")
     face_vs, face_meta_data = load_or_init_vector_store(FACE_VS_PATH, emb_dim=face_emb_dim)
+    _log_face_store(
+        "Loaded face vector store from disk",
+        ntotal=int(face_vs.ntotal),
+        metadata_entry_count=len(face_meta_data),
+        face_vs_id=id(face_vs),
+    )
     return face_vs, face_meta_data
 
 
@@ -57,17 +95,38 @@ def load_person_vector_store():
     global person_vs
     global person_meta_data
     if person_vs is not None and person_meta_data is not None:
+        _log_face_store(
+            "Returning cached person vector store",
+            ntotal=int(person_vs.ntotal),
+            metadata_entry_count=len(person_meta_data),
+            person_vs_id=id(person_vs),
+        )
         return person_vs, person_meta_data
 
+    _log_face_store("Loading person vector store from disk")
     person_vs, person_meta_data = load_or_init_vector_store(PERSON_VS_PATH, emb_dim=face_emb_dim)
+    _log_face_store(
+        "Loaded person vector store from disk",
+        ntotal=int(person_vs.ntotal),
+        metadata_entry_count=len(person_meta_data),
+        person_vs_id=id(person_vs),
+    )
     return person_vs, person_meta_data
 
 
 def save_face_vector_stores() -> None:
     face_vector_store, face_store_meta_data = load_face_vector_store()
     person_vector_store, person_store_meta_data = load_person_vector_store()
+    _log_face_store(
+        "Saving face and person vector stores",
+        face_ntotal=int(face_vector_store.ntotal),
+        face_metadata_entry_count=len(face_store_meta_data),
+        person_ntotal=int(person_vector_store.ntotal),
+        person_metadata_entry_count=len(person_store_meta_data),
+    )
     save_vs(face_vector_store, face_store_meta_data, FACE_VS_PATH)
     save_vs(person_vector_store, person_store_meta_data, PERSON_VS_PATH)
+    _log_face_store("Saved face and person vector stores")
 
 
 def _normalize_embedding(embedding: torch.Tensor) -> torch.Tensor:

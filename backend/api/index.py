@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -15,8 +16,7 @@ from backend.core.indexing.index import index_batch
 from backend.core.models.faces.store import finalize_face_clusters, reset_face_vector_stores, save_face_vector_stores
 from backend.core.models.vision_language.base import BaseEmbeddingModel
 from backend.core.models.vision_language.clip import ClipEmbeddingModel
-from backend.core.models.vision_language.qwen import QwenEmbeddingModel
-from backend.core.models.vision_language.siglip import SiglipEmbeddingModel
+from backend.core.models.vision_language.siglip import SiglipEmbeddingModel, SiglipLargeEmbeddingModel
 from backend.core.models.vision_language.store import reset_image_vector_store, save_image_vector_store
 from backend.db_models.database import get_session
 from backend.db_models.folder import Folder
@@ -31,8 +31,8 @@ router = APIRouter(prefix="/index", tags=["index"])
 IndexPhase = Literal["idle", "scanning", "embeddings", "faces", "thumbnails", "writing", "complete"]
 MODEL_STATE_PATH = Path("backend/data/model_state.json")
 DEFAULT_INDEX_BATCH_SIZE = 32
-QWEN_INDEX_BATCH_SIZE = 8
-QWEN_MODEL_ID = "qwen-vl-embedding-2b"
+SIGLIP2_LARGE_MODEL_ID = "siglip2-large-patch16-384"
+SIGLIP2_LARGE_BATCH_SIZE = 8
 
 
 class ModelInfo(BaseModel):
@@ -114,14 +114,14 @@ MODEL_CATALOG: list[dict[str, Any]] = [
         "factory": SiglipEmbeddingModel,
     },
     {
-        "id": QWEN_MODEL_ID,
-        "name": "Qwen VL Embedding 2B",
-        "description": "Best semantic understanding, but heavier to run locally.",
+        "id": SIGLIP2_LARGE_MODEL_ID,
+        "name": "SigLIP2 Large",
+        "description": "Larger SigLIP2 checkpoint for stronger semantic matching.",
         "quality": "best",
         "speed": "slow",
-        "diskSize": "5+ GB",
-        "suitability": "High-memory GPU recommended",
-        "factory": QwenEmbeddingModel,
+        "diskSize": "3.3 GB",
+        "suitability": "GPU recommended",
+        "factory": SiglipLargeEmbeddingModel,
     },
 ]
 
@@ -143,6 +143,14 @@ _index_state: dict[str, Any] = {
     "totalIndexedImages": 0,
     "indexedPaths": [],
 }
+
+
+def _log_index_api(message: str, **fields: Any) -> None:
+    timestamp = datetime.utcnow().isoformat(timespec="seconds")
+    suffix = ""
+    if fields:
+        suffix = " | " + ", ".join(f"{key}={value!r}" for key, value in fields.items())
+    print(f"[{timestamp}] [INDEX API] {message}{suffix}", flush=True)
 
 
 def _load_active_model_id() -> str | None:
@@ -175,7 +183,9 @@ def get_active_model_id() -> str | None:
 
 
 def _default_batch_size_for_model(model_id: str | None) -> int:
-    return QWEN_INDEX_BATCH_SIZE if model_id == QWEN_MODEL_ID else DEFAULT_INDEX_BATCH_SIZE
+    if model_id == SIGLIP2_LARGE_MODEL_ID:
+        return SIGLIP2_LARGE_BATCH_SIZE
+    return DEFAULT_INDEX_BATCH_SIZE
 
 
 def get_embedding_model(model_id: str | None = None) -> BaseEmbeddingModel:
@@ -185,10 +195,12 @@ def get_embedding_model(model_id: str | None = None) -> BaseEmbeddingModel:
         raise ValueError(f"Unsupported model_id: {resolved_model_id}")
     cached = _embedding_model_cache.get(resolved_model_id)
     if cached is not None:
+        _log_index_api("Reusing cached embedding model", model_id=resolved_model_id, model_type=type(cached).__name__)
         return cached
     factory = model_entry["factory"]
     instance = factory()
     _embedding_model_cache[resolved_model_id] = instance
+    _log_index_api("Created embedding model instance", model_id=resolved_model_id, model_type=type(instance).__name__)
     return instance
 
 
@@ -211,13 +223,16 @@ def _set_model_downloaded(model_id: str, downloaded: bool) -> None:
 
 
 def _warm_active_model(model_id: str) -> None:
+    _log_index_api("Warming active model", model_id=model_id, cached_model_ids=list(_embedding_model_cache.keys()))
     for cached_model_id, model in list(_embedding_model_cache.items()):
         if cached_model_id != model_id:
+            _log_index_api("Unloading cached model", cached_model_id=cached_model_id, model_type=type(model).__name__)
             model.unload_model()
             del _embedding_model_cache[cached_model_id]
 
     model = get_embedding_model(model_id)
     model.load_model()
+    _log_index_api("Active model warmed successfully", model_id=model_id, model_type=type(model).__name__)
 
 
 def get_active_model_info() -> dict[str, Any] | None:
@@ -352,10 +367,20 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
     global _indexing_thread
 
     try:
+        _log_index_api(
+            "Index job started",
+            model_id=model_id,
+            batch_size=batch_size,
+            recursive=recursive,
+            reset_index=reset_index,
+            folder_count=len(folder_paths),
+        )
         if reset_index:
+            _log_index_api("Resetting vector stores before indexing")
             _reset_vector_stores()
 
         image_model = get_embedding_model(model_id)
+        _log_index_api("Resolved image model for index job", model_id=model_id, model_type=type(image_model).__name__)
         discovered_batches: list[tuple[Path, list[Path]]] = []
         total_files = 0
 
@@ -363,6 +388,7 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
             files = list_image_files(folder_path, recursive=recursive)
             discovered_batches.append((folder_path, files))
             total_files += len(files)
+            _log_index_api("Discovered files for folder", folder_path=str(folder_path), file_count=len(files))
 
         _set_state(
             phase="scanning",
@@ -382,6 +408,7 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
 
         with DBSession(engine) as session:
             folder_records = _upsert_folder_records(folder_paths, session=session)
+            _log_index_api("Folder records upserted", folder_record_count=len(folder_records))
             for folder_path in folder_paths:
                 folder_record = folder_records[canonicalize_path_key(folder_path)]
                 folder_record.status = "scanning"
@@ -393,6 +420,7 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
             skipped_count = 0
 
             for folder_path, files in discovered_batches:
+                _log_index_api("Starting folder indexing", folder_path=str(folder_path), file_count=len(files))
                 if not files:
                     folder_record = folder_records[canonicalize_path_key(folder_path)]
                     folder_record.image_count = 0
@@ -405,6 +433,13 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
                 for batch_start in range(0, len(files), batch_size):
                     batch_paths = files[batch_start : batch_start + batch_size]
                     current_file = str(batch_paths[0]) if batch_paths else str(folder_path)
+                    _log_index_api(
+                        "Starting batch",
+                        folder_path=str(folder_path),
+                        batch_start=batch_start,
+                        batch_size=len(batch_paths),
+                        current_file=current_file,
+                    )
                     batch_stats = index_batch(
                         batch_paths,
                         image_model,
@@ -415,6 +450,17 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
                     skipped_count += int(batch_stats.get("failed_count", 0))
                     faces_detected += int(batch_stats.get("face_indexing", {}).get("detected_face_count", 0))
                     progress = int(round((processed_count / total_files) * 100)) if total_files else 100
+                    _log_index_api(
+                        "Finished batch",
+                        folder_path=str(folder_path),
+                        batch_start=batch_start,
+                        progress=progress,
+                        processed_count=processed_count,
+                        skipped_count=skipped_count,
+                        faces_detected=faces_detected,
+                        image_indexed_count=batch_stats.get("image_indexing", {}).get("indexed_count"),
+                        face_indexed_count=batch_stats.get("face_indexing", {}).get("indexed_face_count"),
+                    )
 
                     _set_state(
                         phase=_coarse_phase(processed_count, total_files),
@@ -432,8 +478,11 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
                 folder_record.status = "ready"
                 session.add(folder_record)
                 session.commit()
+                _log_index_api("Folder indexing finished", folder_path=str(folder_path), image_count=folder_record.image_count)
 
+        _log_index_api("Finalizing face clusters")
         final_face_merge_stats = finalize_face_clusters()
+        _log_index_api("Saving vector stores to disk")
         save_image_vector_store()
         save_face_vector_stores()
 
@@ -451,7 +500,16 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
             totalIndexedImages=_count_store_records(IMAGE_VS_PATH),
             mergedPeople=int(final_face_merge_stats.get("merged_person_count", 0)),
         )
+        _log_index_api(
+            "Index job completed",
+            completed_at=completed_at,
+            total_files=total_files,
+            faces_detected=faces_detected,
+            skipped_count=skipped_count,
+            merged_people=final_face_merge_stats.get("merged_person_count", 0),
+        )
     except Exception as exc:
+        _log_index_api("Index job crashed", error=str(exc), traceback=traceback.format_exc())
         _set_state(
             phase="idle",
             currentFile=None,
@@ -459,6 +517,7 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
         )
     finally:
         _indexing_thread = None
+        _log_index_api("Index job thread cleared")
 
 
 def _resolve_folder_paths(payload: StartIndexRequest, session: Session) -> list[Path]:
@@ -585,6 +644,15 @@ def start_indexing(payload: StartIndexRequest, session: Session = Depends(get_se
     if _indexing_thread is not None and _indexing_thread.is_alive():
         raise HTTPException(status_code=409, detail="Indexing is already running")
 
+    _log_index_api(
+        "Received start indexing request",
+        requested_model_id=payload.modelId,
+        requested_batch_size=payload.batchSize,
+        recursive=payload.recursive,
+        reset_index=payload.resetIndex,
+        folder_path_count=len(payload.folderPaths),
+        folder_id_count=len(payload.folderIds),
+    )
     folder_paths = _resolve_folder_paths(payload, session)
     if not folder_paths:
         raise HTTPException(status_code=400, detail="No folders available to index")
@@ -605,6 +673,12 @@ def start_indexing(payload: StartIndexRequest, session: Session = Depends(get_se
         raise HTTPException(status_code=400, detail="Select a model before indexing")
 
     resolved_batch_size = payload.batchSize if payload.batchSize is not None else _default_batch_size_for_model(_active_model_id)
+    _log_index_api(
+        "Resolved indexing configuration",
+        active_model_id=_active_model_id,
+        resolved_batch_size=resolved_batch_size,
+        folder_paths=[str(path) for path in folder_paths],
+    )
 
     _set_state(
         phase="scanning",
@@ -630,6 +704,7 @@ def start_indexing(payload: StartIndexRequest, session: Session = Depends(get_se
         daemon=True,
     )
     _indexing_thread.start()
+    _log_index_api("Background index thread started", thread_name=_indexing_thread.name)
     return read_index_summary(session=session)
 
 

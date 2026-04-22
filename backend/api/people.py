@@ -1,5 +1,7 @@
 import io
+from datetime import datetime
 from pathlib import Path
+import threading
 from typing import Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -14,6 +16,20 @@ from backend.services.person_service import PersonService
 from backend.schemas.person import PersonCreate, PersonUpdate, PersonRead
 
 router = APIRouter(prefix="/people", tags=["people"])
+
+
+def _log_people_api(message: str, **fields: Any) -> None:
+    timestamp = datetime.utcnow().isoformat(timespec="seconds")
+    thread = threading.current_thread()
+    payload = {
+        "thread_name": thread.name,
+        "thread_ident": thread.ident,
+        **fields,
+    }
+    suffix = ""
+    if payload:
+        suffix = " | " + ", ".join(f"{key}={value!r}" for key, value in payload.items())
+    print(f"[{timestamp}] [PEOPLE API] {message}{suffix}", flush=True)
 
 
 def _build_person_response(person_id: int, entry: dict[str, Any], request: Request) -> dict[str, Any]:
@@ -34,7 +50,17 @@ def create_person(person_in: PersonCreate, session: Session = Depends(get_sessio
 
 @router.get("/")
 def read_people(request: Request, skip: int = 0, limit: int | None = None):
+    _log_people_api(
+        "read_people called",
+        skip=skip,
+        limit=limit,
+        path=str(request.url.path),
+    )
     _, person_meta_data = load_person_vector_store()
+    _log_people_api(
+        "read_people loaded person vector store",
+        metadata_entry_count=len(person_meta_data),
+    )
     people: list[dict[str, Any]] = []
     for key, entry in person_meta_data.items():
         if str(key).startswith("_") or not isinstance(entry, dict):
@@ -54,6 +80,7 @@ def read_people(request: Request, skip: int = 0, limit: int | None = None):
 
 @router.get("/{person_id}")
 def read_person(person_id: int, request: Request):
+    _log_people_api("read_person called", person_id=person_id, path=str(request.url.path))
     _, person_meta_data = load_person_vector_store()
     entry = person_meta_data.get(str(person_id))
     if not isinstance(entry, dict):
@@ -62,6 +89,7 @@ def read_person(person_id: int, request: Request):
 
 @router.get("/{person_id}/images")
 def read_person_images(person_id: int, request: Request):
+    _log_people_api("read_person_images called", person_id=person_id, path=str(request.url.path))
     _, person_meta_data = load_person_vector_store()
     entry = person_meta_data.get(str(person_id))
     if not isinstance(entry, dict):
@@ -100,6 +128,7 @@ def read_person_images(person_id: int, request: Request):
 
 @router.get("/{person_id}/face", name="read_person_face")
 def read_person_face(person_id: int):
+    _log_people_api("read_person_face called", person_id=person_id)
     _, person_meta_data = load_person_vector_store()
     entry = person_meta_data.get(str(person_id))
     if not isinstance(entry, dict):
@@ -138,6 +167,7 @@ def read_person_face(person_id: int):
 
 @router.patch("/{person_id}")
 def update_person(person_id: int, person_in: PersonUpdate):
+    _log_people_api("update_person called", person_id=person_id)
     _, person_meta_data = load_person_vector_store()
     entry = person_meta_data.get(str(person_id))
     if not isinstance(entry, dict):

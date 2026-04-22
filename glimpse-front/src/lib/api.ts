@@ -9,11 +9,14 @@ import type {
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 const DEFAULT_INDEX_BATCH_SIZE = 32;
-const QWEN_INDEX_BATCH_SIZE = 8;
-const QWEN_MODEL_ID = "qwen-vl-embedding-2b";
+const SIGLIP2_LARGE_MODEL_ID = "siglip2-large-patch16-384";
+const SIGLIP2_LARGE_BATCH_SIZE = 8;
 
 export function getDefaultIndexBatchSize(modelId?: string | null): number {
-  return modelId === QWEN_MODEL_ID ? QWEN_INDEX_BATCH_SIZE : DEFAULT_INDEX_BATCH_SIZE;
+  if (modelId === SIGLIP2_LARGE_MODEL_ID) {
+    return SIGLIP2_LARGE_BATCH_SIZE;
+  }
+  return DEFAULT_INDEX_BATCH_SIZE;
 }
 
 type IndexingPhase = "idle" | "scanning" | "embeddings" | "faces" | "thumbnails" | "writing" | "complete";

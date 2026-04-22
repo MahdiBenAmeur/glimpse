@@ -11,6 +11,24 @@ let viteProcess
 const FRONTEND_URL = 'http://localhost:8080'
 const BACKEND_URL = 'http://127.0.0.1:8000'
 
+function logElectron(scope, message, extra) {
+    const timestamp = new Date().toISOString()
+    if (extra !== undefined) {
+        console.log(`[${timestamp}] [ELECTRON:${scope}] ${message}`, extra)
+        return
+    }
+    console.log(`[${timestamp}] [ELECTRON:${scope}] ${message}`)
+}
+
+function logElectronError(scope, message, extra) {
+    const timestamp = new Date().toISOString()
+    if (extra !== undefined) {
+        console.error(`[${timestamp}] [ELECTRON:${scope}] ${message}`, extra)
+        return
+    }
+    console.error(`[${timestamp}] [ELECTRON:${scope}] ${message}`)
+}
+
 function resolvePythonCommand() {
     const projectVenvPython = path.join(__dirname, '../desktopvenv/Scripts/python.exe')
     const inheritedVenvPython = process.env.VIRTUAL_ENV
@@ -25,15 +43,24 @@ function resolvePythonCommand() {
 
 // Start FastAPI
 function startBackend() {
-    backendProcess = spawn(resolvePythonCommand(), [
-        path.join(__dirname, '../server.py')
+    const pythonCommand = resolvePythonCommand()
+    const serverScript = path.join(__dirname, '../server.py')
+    const backendCwd = path.join(__dirname, '..')
+    logElectron('BACKEND', 'Starting backend process', { pythonCommand, serverScript, backendCwd })
+
+    backendProcess = spawn(pythonCommand, [
+        serverScript
     ], {
         cwd: path.join(__dirname, '..'),
         shell: false
     })
+    logElectron('BACKEND', `Backend process spawned with pid=${backendProcess.pid ?? 'unknown'}`)
 
     backendProcess.stdout.on('data', d => console.log(`[FASTAPI]: ${d}`))
     backendProcess.stderr.on('data', d => console.error(`[FASTAPI ERROR]: ${d}`))
+    backendProcess.on('error', error => logElectronError('BACKEND', 'Backend process emitted error', error))
+    backendProcess.on('exit', (code, signal) => logElectronError('BACKEND', `Backend process exited`, { code, signal }))
+    backendProcess.on('close', (code, signal) => logElectronError('BACKEND', `Backend process closed`, { code, signal }))
 }
 
 function waitForBackend(callback) {
@@ -42,15 +69,20 @@ function waitForBackend(callback) {
 
     const interval = setInterval(() => {
         attempts++
+        if (attempts === 1 || attempts % 5 === 0) {
+            logElectron('BACKEND', `Waiting for backend health check attempt ${attempts}/${maxAttempts}`)
+        }
 
         http.get(BACKEND_URL, () => {
             clearInterval(interval)
-            console.log('Backend ready')
+            logElectron('BACKEND', `Backend ready after ${attempts} attempts`)
             callback()
-        }).on('error', () => {
+        }).on('error', error => {
             if (attempts >= maxAttempts) {
                 clearInterval(interval)
-                console.error('Backend did not start in time')
+                logElectronError('BACKEND', 'Backend did not start in time', error)
+            } else if (attempts === 1 || attempts % 5 === 0) {
+                logElectronError('BACKEND', `Backend health check failed on attempt ${attempts}`, error.message)
             }
         })
     }, 500)
@@ -58,6 +90,9 @@ function waitForBackend(callback) {
 
 // Start Vite
 function startVite() {
+    const frontendCwd = path.join(__dirname, '../glimpse-front')
+    logElectron('FRONTEND', 'Starting frontend dev server', { frontendCwd, platform: process.platform })
+
     if (process.platform === 'win32') {
         viteProcess = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'npm run dev'], {
             cwd: path.join(__dirname, '../glimpse-front'),
@@ -69,9 +104,13 @@ function startVite() {
             shell: false
         })
     }
+    logElectron('FRONTEND', `Frontend process spawned with pid=${viteProcess.pid ?? 'unknown'}`)
 
     viteProcess.stdout.on('data', d => console.log(`[VITE]: ${d}`))
     viteProcess.stderr.on('data', d => console.error(`[VITE ERROR]: ${d}`))
+    viteProcess.on('error', error => logElectronError('FRONTEND', 'Frontend process emitted error', error))
+    viteProcess.on('exit', (code, signal) => logElectronError('FRONTEND', `Frontend process exited`, { code, signal }))
+    viteProcess.on('close', (code, signal) => logElectronError('FRONTEND', `Frontend process closed`, { code, signal }))
 }
 
 function waitForFrontend(callback) {
@@ -80,14 +119,20 @@ function waitForFrontend(callback) {
 
     const interval = setInterval(() => {
         attempts++
+        if (attempts === 1 || attempts % 5 === 0) {
+            logElectron('FRONTEND', `Waiting for frontend health check attempt ${attempts}/${maxAttempts}`)
+        }
 
         http.get(FRONTEND_URL, () => {
             clearInterval(interval)
+            logElectron('FRONTEND', `Frontend ready after ${attempts} attempts`)
             callback()
-        }).on('error', () => {
+        }).on('error', error => {
             if (attempts >= maxAttempts) {
                 clearInterval(interval)
-                console.error('Vite did not start in time')
+                logElectronError('FRONTEND', 'Vite did not start in time', error)
+            } else if (attempts === 1 || attempts % 5 === 0) {
+                logElectronError('FRONTEND', `Frontend health check failed on attempt ${attempts}`, error.message)
             }
         })
     }, 500)
@@ -95,6 +140,7 @@ function waitForFrontend(callback) {
 
 // Create window
 function createWindow() {
+    logElectron('WINDOW', 'Creating browser window')
     mainWindow = new BrowserWindow({
         width: 1200,
         height: 800,
@@ -109,6 +155,15 @@ function createWindow() {
     })
 
     mainWindow.loadURL(FRONTEND_URL)
+    mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+        logElectronError('WINDOW', 'Window failed to load URL', { errorCode, errorDescription, validatedURL })
+    })
+    mainWindow.webContents.on('did-finish-load', () => {
+        logElectron('WINDOW', 'Window finished loading')
+    })
+    mainWindow.on('closed', () => {
+        logElectron('WINDOW', 'Main window closed')
+    })
 }
 
 const { exec } = require('child_process')
@@ -128,6 +183,7 @@ function killProcessTree(pid) {
 
 // App ready
 app.whenReady().then(() => {
+    logElectron('APP', 'Electron app is ready')
     startBackend()
 
     // Wait for backend FIRST
@@ -144,11 +200,13 @@ app.whenReady().then(() => {
 
 // Ensure app quits when window is closed
 app.on('window-all-closed', () => {
+    logElectron('APP', 'All windows closed, quitting app')
     app.quit()
 })
 
 // Cleanup
 app.on('will-quit', () => {
+    logElectron('APP', 'Electron will quit, cleaning up child processes')
     if (backendProcess) killProcessTree(backendProcess.pid)
     if (viteProcess) killProcessTree(viteProcess.pid)
 })
