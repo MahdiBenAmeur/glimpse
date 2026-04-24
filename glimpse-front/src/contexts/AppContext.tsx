@@ -120,6 +120,23 @@ function deriveOnboardingState(
   return { isFirstLaunch: false, onboardingStep: 3 };
 }
 
+function markModelAsActive(models: ModelInfo[], modelId: string) {
+  const nextModels = models.map((model) => {
+    if (model.id === modelId) {
+      return { ...model, status: "active" as ModelInfo["status"], downloadProgress: undefined };
+    }
+    if (model.status === "active") {
+      return { ...model, status: "installed" as ModelInfo["status"], downloadProgress: undefined };
+    }
+    return model;
+  });
+
+  return {
+    models: nextModels,
+    activeModel: nextModels.find((model) => model.id === modelId) ?? null,
+  };
+}
+
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
   return "Something went wrong";
@@ -339,7 +356,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
       async () => {
         await api.activateModel(id);
         const currentFolders = state.folders.map((folder) => folder.path);
-        if (currentFolders.length > 0) {
+        if (currentFolders.length === 0) {
+          await refreshData();
+          return;
+        }
+
+        setBackgroundIndexingHidden(false);
+        setState((prev) => {
+          const { models, activeModel } = markModelAsActive(prev.models, id);
+          const nextIndexingStatus: IndexingStatus = {
+            phase: "scanning",
+            progress: 0,
+            total: prev.indexingStatus.total,
+            processed: 0,
+            facesDetected: 0,
+            skipped: 0,
+            currentFile: currentFolders[0] ?? prev.indexingStatus.currentFile,
+          };
+          const onboarding = deriveOnboardingState(
+            activeModel,
+            prev.folders,
+            nextIndexingStatus,
+            prev.lastIndexedTime,
+            prev.totalIndexedImages,
+            false,
+          );
+
+          return {
+            ...prev,
+            models,
+            activeModel,
+            indexingStatus: nextIndexingStatus,
+            isFirstLaunch: onboarding.isFirstLaunch,
+            onboardingStep: onboarding.onboardingStep,
+          };
+        });
+
+        try {
           const summary = await api.startIndexing({
             folderPaths: currentFolders,
             modelId: id,
@@ -348,20 +401,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
             resetIndex: true,
           });
 
-          setState((prev) => ({
-            ...prev,
-            activeModel: prev.models.find((model) => model.id === id) ?? prev.activeModel,
-            indexingStatus: summary.indexingStatus,
-            lastIndexedTime: summary.lastIndexedTime,
-            totalIndexedImages: summary.totalIndexedImages,
-          }));
-        }
+          setState((prev) => {
+            const { models, activeModel } = markModelAsActive(prev.models, id);
+            const onboarding = deriveOnboardingState(
+              activeModel,
+              prev.folders,
+              summary.indexingStatus,
+              summary.lastIndexedTime,
+              summary.totalIndexedImages,
+              false,
+            );
 
-        await refreshData();
+            return {
+              ...prev,
+              models,
+              activeModel,
+              indexingStatus: summary.indexingStatus,
+              lastIndexedTime: summary.lastIndexedTime,
+              totalIndexedImages: summary.totalIndexedImages,
+              isFirstLaunch: onboarding.isFirstLaunch,
+              onboardingStep: onboarding.onboardingStep,
+            };
+          });
+        } catch (error) {
+          await refreshData();
+          throw error;
+        }
       },
       { successMessage: state.folders.length > 0 ? "Model switched. Rebuild started." : "Model switched." },
     );
-  }, [refreshData, state.folders, withBusy]);
+  }, [refreshData, setBackgroundIndexingHidden, state.folders, withBusy]);
 
   const removeModel = useCallback((_id: string) => {
     toast.info("Model removal is not wired yet.");

@@ -4,7 +4,7 @@ from huggingface_hub import hf_hub_download
 from PIL import Image
 from ultralytics import YOLO
 
-from backend.config import DETECTOR_MODEL, FACE_MIN_BOX_SIZE, models_cache_dir
+from backend.config import DETECTOR_MODEL, FACE_MIN_BOX_SIZE, models_cache_dir , device
 
 def load_face_detector():
     global DETECTOR_MODEL
@@ -16,7 +16,7 @@ def load_face_detector():
         cache_dir=models_cache_dir,
     )
 
-    model = YOLO(model_path)
+    model = YOLO(model_path  )
     DETECTOR_MODEL = model
     return model
 

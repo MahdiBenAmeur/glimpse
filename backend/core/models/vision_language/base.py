@@ -87,11 +87,6 @@ class BaseEmbeddingModel:
 
     def unload_model(self) -> None:
         self._processor = None
-        if self._model is not None:
-            try:
-                self._model.to("cpu")
-            except Exception:
-                pass
         self._model = None
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

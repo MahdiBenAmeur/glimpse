@@ -80,7 +80,7 @@ function GeneralSettings() {
 }
 
 function ModelsSettings() {
-  const { models, activeModel, folders, totalIndexedImages, downloadModel, setActiveModel, switchModelAndRebuild } = useApp();
+  const { models, activeModel, folders, totalIndexedImages, downloadModel, setActiveModel, switchModelAndRebuild, isWorking } = useApp();
   const [switchDialog, setSwitchDialog] = useState<string | null>(null);
 
   const handleSwitch = (id: string) => {
@@ -130,7 +130,7 @@ function ModelsSettings() {
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 {model.status === "not_installed" && (
-                  <Button size="sm" variant="outline" className="text-xs h-8" onClick={() => void downloadModel(model.id)}>
+                  <Button size="sm" variant="outline" className="text-xs h-8" onClick={() => void downloadModel(model.id)} disabled={isWorking}>
                     <Download className="w-3 h-3 mr-1.5" /> Download
                   </Button>
                 )}
@@ -140,7 +140,7 @@ function ModelsSettings() {
                   </Button>
                 )}
                 {model.status === "installed" && (
-                  <Button size="sm" className="text-xs h-8" onClick={() => handleSwitch(model.id)}>
+                  <Button size="sm" className="text-xs h-8" onClick={() => handleSwitch(model.id)} disabled={isWorking}>
                     <Check className="w-3 h-3 mr-1.5" /> {activeModel ? "Switch & rebuild" : "Use"}
                   </Button>
                 )}
@@ -151,7 +151,11 @@ function ModelsSettings() {
         ))}
       </div>
 
-      <Dialog open={!!switchDialog} onOpenChange={() => setSwitchDialog(null)}>
+      <Dialog open={!!switchDialog} onOpenChange={(open) => {
+        if (!open && !isWorking) {
+          setSwitchDialog(null);
+        }
+      }}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle className="text-base">Switch model?</DialogTitle>
@@ -164,8 +168,10 @@ function ModelsSettings() {
             <p className="text-xs text-foreground">Changing the active model starts a full rebuild immediately so search stays consistent.</p>
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setSwitchDialog(null)}>Cancel</Button>
-            <Button size="sm" onClick={() => { void confirmSwitch(); }}>Switch & rebuild now</Button>
+            <Button variant="ghost" size="sm" onClick={() => setSwitchDialog(null)} disabled={isWorking}>Cancel</Button>
+            <Button size="sm" onClick={() => { void confirmSwitch(); }} disabled={isWorking}>
+              {isWorking ? "Rebuilding..." : "Switch & rebuild now"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -21,8 +21,7 @@ class ClipEmbeddingModel(BaseEmbeddingModel):
 
         processor, model = self.load_model()
         pil_images = [self._to_pil_image(image) for image in images]
-        inputs = processor(images=pil_images, return_tensors="pt")
-        inputs = {name: tensor.to(device) for name, tensor in inputs.items()}
+        inputs = processor(images=pil_images, return_tensors="pt" ,device=device)
 
         with torch.inference_mode():
             image_features = model.get_image_features(**inputs)
