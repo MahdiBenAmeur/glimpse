@@ -25,6 +25,8 @@ cd glimpse-front
 npm install
 cd ..
 ```
+
+### Electron
 if you want to use electron to lanch as a desktop app
 
 ```bash
@@ -33,29 +35,7 @@ npm install
 cd ..
 ```
 
-### Optional virtual environment
-
-Electron looks for Python in this order:
-
-1. `BACKEND_PYTHON`
-2. `desktopvenv/Scripts/python.exe`
-3. the current `VIRTUAL_ENV`
-4. `python` on `PATH`
-
-If you want Electron to automatically use a project-local interpreter, create a virtual environment at `desktopvenv`.
-
 ## Launch
-
-### Recommended
-
-Run the desktop app through Electron:
-
-```bash
-cd electron
-npx electron .
-```
-
-Electron starts the FastAPI backend, waits for it on `http://127.0.0.1:8000`, starts the Vite frontend on `http://localhost:8080`, and then opens the desktop window.
 
 ### Run pieces separately
 
@@ -72,7 +52,57 @@ cd glimpse-front
 npm run dev
 ```
 
+### directly through Electron
+
+Run the desktop app through Electron:
+
+```bash
+cd electron
+npx electron .
+```
+
+Electron starts the FastAPI backend, waits for it on `http://127.0.0.1:8000`, starts the Vite frontend on `http://localhost:8080`, and then opens the desktop window.
+
+
 If this is the first time you use the app, you will also need to download and activate one of the supported embedding models from the onboarding flow before indexing.
+
+
+## Project structure
+
+### Top level
+
+- `server.py`: FastAPI application entry point used by both direct backend runs and Electron
+- `backend/`: backend API, indexing, search, models, state management, and tests
+- `glimpse-front/`: React + Vite frontend
+- `electron/`: desktop launcher that boots backend and frontend, then opens the app window
+- `scripts/`: maintenance and inspection scripts for local data and clustering analysis
+- `test_images/`: sample images for manual testing
+- `requirements.txt`: root Python dependency entry that delegates to `backend/requirements.txt`
+- `FEATURES.md`: broader product feature inventory
+
+### Backend
+
+- `backend/api/`: FastAPI route modules for indexing, search, folders, people, collections, images, and saved searches
+- `backend/core/`: core search and indexing logic, including image embedding, face detection, face clustering, and vector store orchestration
+- `backend/core/indexing/index.py`: the main indexing pipeline that prepares images, loads models, writes embeddings, and finalizes face and person stores
+- `backend/core/search/search.py`: the semantic search engine that runs text and image similarity search, applies filters, and ranks results
+- `backend/core/models/vision_language/`: model wrappers for CLIP and SigLIP-based image/text embedding
+- `backend/core/models/faces/`: face detection, face embedding, and person-clustering store logic
+- `backend/db_models/`: SQLModel table definitions and database setup
+- `backend/schemas/`: request and response schemas used by the API layer
+- `backend/services/`: application services for folders, imports, media metadata, thumbnails, collections, saved searches, and library state
+- `backend/utils/`: lower-level helpers for image preparation, path normalization, and FAISS store utilities
+- `backend/tests/`: backend test coverage
+- `backend/data/`: generated runtime data such as vector stores, cached models, imported files, and thumbnails
+
+### Frontend
+
+- `glimpse-front/src/pages/`: main screens such as onboarding, search, people, collections, saved searches, index manager, and settings
+- `glimpse-front/src/components/`: shared UI, layout, search widgets, and image viewer components
+- `glimpse-front/src/contexts/`: app-wide state management for onboarding, models, indexing, and search results
+- `glimpse-front/src/lib/`: API client and shared frontend utilities
+- `glimpse-front/public/`: static assets served by Vite
+
 
 ## How the pipeline works
 
@@ -99,48 +129,14 @@ Glimpse keeps most runtime data locally:
 - `backend/data/model_state.json`: active model selection
 - `saved_searches.json`: saved search definitions
 
-## Project structure
-
-### Top level
-
-- `server.py`: FastAPI application entry point used by both direct backend runs and Electron
-- `backend/`: backend API, indexing, search, models, state management, and tests
-- `glimpse-front/`: React + Vite frontend
-- `electron/`: desktop launcher that boots backend and frontend, then opens the app window
-- `scripts/`: maintenance and inspection scripts for local data and clustering analysis
-- `test_images/`: sample images for manual testing
-- `requirements.txt`: root Python dependency entry that delegates to `backend/requirements.txt`
-- `FEATURES.md`: broader product feature inventory
-
-### Backend
-
-- `backend/api/`: FastAPI route modules for indexing, search, folders, people, collections, images, and saved searches
-- `backend/core/`: core search and indexing logic, including image embedding, face detection, face clustering, and vector store orchestration
-- `backend/core/models/vision_language/`: model wrappers for CLIP and SigLIP-based image/text embedding
-- `backend/core/models/faces/`: face detection, face embedding, and person-clustering store logic
-- `backend/db_models/`: SQLModel table definitions and database setup
-- `backend/schemas/`: request and response schemas used by the API layer
-- `backend/services/`: application services for folders, imports, media metadata, thumbnails, collections, saved searches, and library state
-- `backend/utils/`: lower-level helpers for image preparation, path normalization, and FAISS store utilities
-- `backend/tests/`: backend test coverage
-- `backend/data/`: generated runtime data such as vector stores, cached models, imported files, and thumbnails
-
-### Frontend
-
-- `glimpse-front/src/pages/`: main screens such as onboarding, search, people, collections, saved searches, index manager, and settings
-- `glimpse-front/src/components/`: shared UI, layout, search widgets, and image viewer components
-- `glimpse-front/src/contexts/`: app-wide state management for onboarding, models, indexing, and search results
-- `glimpse-front/src/lib/`: API client and shared frontend utilities
-- `glimpse-front/public/`: static assets served by Vite
 
 ### Desktop shell and scripts
 
 - `electron/main.js`: starts Python, waits for backend health, starts Vite, then creates the Electron window
 - `scripts/reset_library_data.py`: clears index, SQLite, and state files while preserving downloaded models
-- `scripts/check_person_centroid_similarity.py`: helper for inspecting clustering behavior
 
 ## Development notes
 
 - The app is designed around local file access and local inference.
-- Search quality depends on indexing with the currently active model. Switching models is expected to trigger a rebuild so vector dimensions and checkpoints stay consistent.
+- Search quality depends on indexing with the currently active model. Switching models triggers a rebuild so vector dimensions and checkpoints stay consistent.
 - Model download is separate from model activation. The first download requires internet access because checkpoints are pulled through Hugging Face.

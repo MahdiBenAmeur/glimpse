@@ -30,13 +30,11 @@ function logElectronError(scope, message, extra) {
 }
 
 function resolvePythonCommand() {
-    const projectVenvPython = path.join(__dirname, '../desktopvenv/Scripts/python.exe')
     const inheritedVenvPython = process.env.VIRTUAL_ENV
         ? path.join(process.env.VIRTUAL_ENV, 'Scripts', 'python.exe')
         : null
 
     return process.env.BACKEND_PYTHON
-        || (fs.existsSync(projectVenvPython) ? projectVenvPython : null)
         || (inheritedVenvPython && fs.existsSync(inheritedVenvPython) ? inheritedVenvPython : null)
         || 'python'
 }
@@ -64,7 +62,7 @@ function startBackend() {
 }
 
 function waitForBackend(callback) {
-    const maxAttempts = 50
+    const maxAttempts = 200
     let attempts = 0
 
     const interval = setInterval(() => {

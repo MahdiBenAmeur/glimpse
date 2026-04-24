@@ -1,6 +1,6 @@
 import { Heart, Users } from "lucide-react";
 import { useApp } from "@/contexts/AppContext";
-import type { ImageResult } from "@/data/mockData";
+import type { ImageResult } from "@/types/app";
 import { useState } from "react";
 import { ImageViewer } from "@/components/ImageViewer";
 

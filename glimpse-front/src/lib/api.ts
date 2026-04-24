@@ -5,7 +5,7 @@ import type {
   ModelInfo,
   PersonInfo,
   SavedSearch,
-} from "@/data/mockData";
+} from "@/types/app";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 const DEFAULT_INDEX_BATCH_SIZE = 32;
