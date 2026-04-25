@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from backend.config import FACE_VS_PATH, IMAGE_VS_PATH, PERSON_VS_PATH
+from backend.config import DATA_DIR, FACE_VS_PATH, IMAGE_VS_PATH, MODEL_STATE_PATH, PERSON_VS_PATH, THUMBNAIL_CACHE_DIR
 from backend.core.indexing.index import index_batch
 from backend.core.models.faces.store import finalize_face_clusters, reset_face_vector_stores, save_face_vector_stores
 from backend.core.models.vision_language.base import BaseEmbeddingModel
@@ -21,7 +21,7 @@ from backend.core.models.vision_language.store import reset_image_vector_store, 
 from backend.db_models.database import get_session
 from backend.db_models.folder import Folder
 from backend.services.folder_service import _folder_score
-from backend.services.media_service import THUMBNAIL_CACHE_DIR, clear_thumbnail_cache
+from backend.services.media_service import clear_thumbnail_cache
 from backend.utils.image_processing import list_image_files
 from backend.utils.path_utils import canonicalize_path, canonicalize_path_key
 from backend.utils.vector_store_utils import delete_vs
@@ -29,7 +29,6 @@ from backend.utils.vector_store_utils import delete_vs
 router = APIRouter(prefix="/index", tags=["index"])
 
 IndexPhase = Literal["idle", "scanning", "embeddings", "faces", "thumbnails", "writing", "complete"]
-MODEL_STATE_PATH = Path("backend/data/model_state.json")
 DEFAULT_INDEX_BATCH_SIZE = 32
 SIGLIP2_LARGE_MODEL_ID = "siglip2-large-patch16-384"
 SIGLIP2_LARGE_BATCH_SIZE = 8
@@ -717,7 +716,7 @@ def reindex(payload: StartIndexRequest, session: Session = Depends(get_session))
 @router.get("/storage-summary", response_model=StorageSummaryResponse)
 def read_storage_summary() -> dict[str, Any]:
     return {
-        "indexPath": str(Path("backend/data").resolve()),
+        "indexPath": str(DATA_DIR.resolve()),
         "indexSizeBytes": _directory_size_bytes(IMAGE_VS_PATH) + _directory_size_bytes(FACE_VS_PATH) + _directory_size_bytes(PERSON_VS_PATH),
         "thumbnailCachePath": str(THUMBNAIL_CACHE_DIR.resolve()),
         "thumbnailCacheBytes": _directory_size_bytes(THUMBNAIL_CACHE_DIR),

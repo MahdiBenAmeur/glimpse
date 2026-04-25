@@ -4,6 +4,7 @@ uvicorn==0.44.0
 sqlmodel==0.0.38
 pydantic==2.13.0
 python-multipart==0.0.26
+platformdirs==4.5.0
 
 # Vector search and image handling
 faiss-cpu==1.13.2

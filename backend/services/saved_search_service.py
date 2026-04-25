@@ -1,25 +1,25 @@
 import json
-import os
 import uuid
 from typing import List, Optional
 from backend.schemas.saved_search import SavedSearchCreate, SavedSearchUpdate, SavedSearchRead
+from backend.config import SAVED_SEARCHES_PATH
 
-SAVED_SEARCHES_FILE = "saved_searches.json"
 
 class SavedSearchService:
     @staticmethod
     def _read_data() -> List[dict]:
-        if not os.path.exists(SAVED_SEARCHES_FILE):
+        if not SAVED_SEARCHES_PATH.exists():
             return []
         try:
-            with open(SAVED_SEARCHES_FILE, "r") as f:
+            with SAVED_SEARCHES_PATH.open("r", encoding="utf-8") as f:
                 return json.load(f)
-        except json.JSONDecodeError:
+        except (OSError, json.JSONDecodeError):
             return []
 
     @staticmethod
     def _write_data(data: List[dict]):
-        with open(SAVED_SEARCHES_FILE, "w") as f:
+        SAVED_SEARCHES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with SAVED_SEARCHES_PATH.open("w", encoding="utf-8") as f:
             # We use default=str so datetime gets serialized correctly
             json.dump(data, f, indent=4, default=str)
 

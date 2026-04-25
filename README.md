@@ -93,7 +93,7 @@ If this is the first time you use the app, you will also need to download and ac
 - `backend/services/`: application services for folders, imports, media metadata, thumbnails, collections, saved searches, and library state
 - `backend/utils/`: lower-level helpers for image preparation, path normalization, and FAISS store utilities
 - `backend/tests/`: backend test coverage
-- `backend/data/`: generated runtime data such as vector stores, cached models, imported files, and thumbnails
+- configured app data/cache directories: generated runtime data such as vector stores, cached models, imported files, and thumbnails
 
 ### Frontend
 
@@ -111,7 +111,7 @@ If this is the first time you use the app, you will also need to download and ac
 3. The active vision-language model generates normalized embeddings for each image and stores them in the image FAISS vector store.
 4. A face detector finds faces in each image, a face embedding model converts crops into embeddings, and the app assigns those faces to existing people clusters or creates new ones.
 5. Person centroids and exemplar faces are updated, then duplicate people clusters are merged when similarity thresholds are met.
-6. Vector stores and metadata are written to disk under `backend/data`, folder stats are updated, and thumbnails are generated on demand and cached.
+6. Vector stores and metadata are written to the configured app data directory, folder stats are updated, and thumbnails are generated on demand and cached.
 7. Search requests embed the text query, rank images from the image vector store, and then apply folder, date, face-presence, person, and optional face-photo filters.
 8. The API enriches results with thumbnails, dimensions, dates, favorites, collections, and people labels before returning them to the frontend.
 
@@ -119,15 +119,15 @@ If this is the first time you use the app, you will also need to download and ac
 
 Glimpse keeps most runtime data locally:
 
-- `glimpse.db`: SQLite database for core app records such as folders and collections
-- `backend/data/image_vector_store`: image embeddings and image metadata
-- `backend/data/face_vector_store`: face embeddings and face-level metadata
-- `backend/data/person_vector_store`: people centroids and cluster metadata
-- `backend/data/cache_dir`: downloaded model files
-- `backend/data/thumbnails`: generated thumbnail cache
-- `backend/data/library_state.json`: favorites and collection membership state
-- `backend/data/model_state.json`: active model selection
-- `saved_searches.json`: saved search definitions
+- `SQLITE_DB_PATH`: SQLite database for core app records such as folders and collections
+- `IMAGE_VS_PATH`: image embeddings and image metadata
+- `FACE_VS_PATH`: face embeddings and face-level metadata
+- `PERSON_VS_PATH`: people centroids and cluster metadata
+- `models_cache_dir`: downloaded model files
+- `THUMBNAIL_CACHE_DIR`: generated thumbnail cache
+- `LIBRARY_STATE_PATH`: favorites and collection membership state
+- `MODEL_STATE_PATH`: active model selection
+- `SAVED_SEARCHES_PATH`: saved search definitions
 
 
 ### Desktop shell and scripts

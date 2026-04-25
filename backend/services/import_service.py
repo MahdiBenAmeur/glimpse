@@ -5,10 +5,8 @@ import time
 from pathlib import Path
 from tkinter import Tk, filedialog
 
+from backend.config import IMPORTED_LIBRARY_ROOT
 from backend.utils.image_processing import IMAGE_SUFFIXES
-
-
-IMPORTED_LIBRARY_ROOT = Path("backend/data/imported_library")
 
 
 def _open_dialog(callback):

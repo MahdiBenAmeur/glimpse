@@ -1,20 +1,35 @@
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from backend.config import (
+    FACE_VS_PATH,
+    IMAGE_VS_PATH,
+    IMPORTED_LIBRARY_ROOT,
+    LIBRARY_STATE_PATH,
+    MODEL_STATE_PATH,
+    PERSON_VS_PATH,
+    SAVED_SEARCHES_PATH,
+    SQLITE_DB_PATH,
+    THUMBNAIL_CACHE_DIR,
+)
+
 
 TARGETS = [
-    ROOT / "backend" / "data" / "face_vector_store",
-    ROOT / "backend" / "data" / "person_vector_store",
-    ROOT / "backend" / "data" / "image_vector_store",
-    ROOT / "backend" / "data" / "imported_library",
-    ROOT / "backend" / "data" / "library_state.json",
-    ROOT / "backend" / "data" / "model_state.json",
-    ROOT / "saved_searches.json",
-    ROOT / "glimpse.db",
+    FACE_VS_PATH,
+    PERSON_VS_PATH,
+    IMAGE_VS_PATH,
+    IMPORTED_LIBRARY_ROOT,
+    LIBRARY_STATE_PATH,
+    MODEL_STATE_PATH,
+    THUMBNAIL_CACHE_DIR,
+    SAVED_SEARCHES_PATH,
+    SQLITE_DB_PATH,
 ]
 
 
@@ -33,7 +48,7 @@ def remove_path(path: Path) -> None:
 
 
 def main() -> None:
-    print("Deleting index/vector/sqlite data. Model downloads in backend/data/cache_dir are left untouched.")
+    print("Deleting configured library, index, thumbnail, saved-search, and sqlite data. Model downloads are left untouched.")
     for target in TARGETS:
         remove_path(target)
     print("Done.")

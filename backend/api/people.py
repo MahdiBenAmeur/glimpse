@@ -4,7 +4,7 @@ from pathlib import Path
 import threading
 from typing import Any, List
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 
@@ -88,8 +88,13 @@ def read_person(person_id: int, request: Request):
     return _build_person_response(person_id, entry, request)
 
 @router.get("/{person_id}/images")
-def read_person_images(person_id: int, request: Request):
-    _log_people_api("read_person_images called", person_id=person_id, path=str(request.url.path))
+def read_person_images(
+    person_id: int,
+    request: Request,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    _log_people_api("read_person_images called", person_id=person_id, path=str(request.url.path), skip=skip, limit=limit)
     _, person_meta_data = load_person_vector_store()
     entry = person_meta_data.get(str(person_id))
     if not isinstance(entry, dict):
@@ -98,7 +103,9 @@ def read_person_images(person_id: int, request: Request):
     image_paths = entry.get("image_paths", [])
     image_created_ats = entry.get("image_created_ats", [])
     items = []
-    for index, image_path in enumerate(image_paths):
+    page_image_paths = image_paths[skip : skip + limit]
+    for relative_index, image_path in enumerate(page_image_paths):
+        index = skip + relative_index
         image_id = find_image_id_by_path(image_path)
         if image_id is None:
             continue

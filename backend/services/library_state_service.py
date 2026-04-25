@@ -1,15 +1,11 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
+from backend.config import IMAGE_META_PATH, LIBRARY_STATE_PATH
 from backend.core.models.vision_language.store import get_loaded_image_metadata
 from backend.utils.path_utils import canonicalize_path, canonicalize_path_key
-
-
-IMAGE_META_PATH = Path("backend/data/image_vector_store/meta_data.json")
-LIBRARY_STATE_PATH = Path("backend/data/library_state.json")
 
 
 def load_image_meta_data() -> dict[str, Any]:

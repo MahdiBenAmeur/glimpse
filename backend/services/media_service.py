@@ -7,10 +7,10 @@ from pathlib import Path
 
 from PIL import Image
 
+from backend.config import THUMBNAIL_CACHE_DIR
 from backend.utils.path_utils import canonicalize_path
 
 
-THUMBNAIL_CACHE_DIR = Path("backend/data/thumbnails")
 DEFAULT_THUMBNAIL_SIZE = 512
 
 

@@ -5,11 +5,13 @@ import mimetypes
 from pathlib import Path
 import tempfile
 from typing import Any, Literal
+import uuid
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from backend.config import FACE_QUERY_UPLOAD_DIR
 from backend.core.models.faces.store import load_face_vector_store, load_person_vector_store
 from backend.core.search.search import global_search, search_by_image
 from backend.api.index import get_active_model_id, get_active_model_info, get_embedding_model
@@ -54,6 +56,11 @@ class SearchImageResult(BaseModel):
     people: list[str] = Field(default_factory=list)
     collections: list[str] = Field(default_factory=list)
     score: float | None = None
+
+
+class FacePhotoUploadResponse(BaseModel):
+    path: str
+    filename: str
 
 
 class SearchResponse(BaseModel):
@@ -245,6 +252,29 @@ def run_search(payload: SearchRequest, request: Request) -> dict[str, Any]:
         "activeModelId": payload.modelId or get_active_model_id(),
         "activeModel": get_active_model_info(),
         "results": items,
+    }
+
+
+@router.post("/face-photo", response_model=FacePhotoUploadResponse)
+async def upload_face_photo(file: UploadFile = File(...)) -> dict[str, str]:
+    filename = file.filename or "face-photo.jpg"
+    suffix = Path(filename).suffix or ".jpg"
+    if file.content_type is not None and not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Uploaded file must be an image")
+
+    FACE_QUERY_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    target_path = FACE_QUERY_UPLOAD_DIR / f"{uuid.uuid4().hex}{suffix}"
+    try:
+        with target_path.open("wb") as handle:
+            handle.write(await file.read())
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not save face photo: {exc}") from exc
+    finally:
+        await file.close()
+
+    return {
+        "path": str(target_path.resolve()),
+        "filename": filename,
     }
 
 

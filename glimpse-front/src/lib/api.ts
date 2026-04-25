@@ -327,6 +327,19 @@ export async function searchByImageFile(file: File, limit = 24): Promise<ImageRe
   })).map(mapImage);
 }
 
+export async function uploadFaceSearchPhoto(file: File): Promise<{ path: string; filename: string }> {
+  const body = new FormData();
+  body.append("file", file);
+  const raw = await apiRequest<any>("/api/search/face-photo", {
+    method: "POST",
+    body,
+  });
+  return {
+    path: String(raw.path ?? ""),
+    filename: String(raw.filename ?? file.name),
+  };
+}
+
 export async function getFavorites(): Promise<ImageResult[]> {
   return (await apiRequest<any[]>("/api/images/indexed?favorite=true")).map(mapImage);
 }
@@ -356,8 +369,12 @@ export async function renamePerson(personId: string, name: string): Promise<void
   });
 }
 
-export async function getPersonImages(personId: string): Promise<ImageResult[]> {
-  return (await apiRequest<any[]>(`/api/people/${personId}/images`)).map(mapImage);
+export async function getPersonImages(personId: string, options?: { skip?: number; limit?: number }): Promise<ImageResult[]> {
+  const params = new URLSearchParams();
+  if (options?.skip !== undefined) params.set("skip", String(options.skip));
+  if (options?.limit !== undefined) params.set("limit", String(options.limit));
+  const query = params.toString();
+  return (await apiRequest<any[]>(`/api/people/${personId}/images${query ? `?${query}` : ""}`)).map(mapImage);
 }
 
 export async function getCollections(): Promise<CollectionInfo[]> {

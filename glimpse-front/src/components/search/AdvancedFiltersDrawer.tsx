@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { X, Upload } from "lucide-react";
+import { Loader2, X, Upload } from "lucide-react";
 import { useApp } from "@/contexts/AppContext";
+import { uploadFaceSearchPhoto } from "@/lib/api";
 
 interface Props {
   open: boolean;
@@ -23,10 +24,14 @@ interface Props {
 
 export function AdvancedFiltersDrawer({ open, onOpenChange, onApply }: Props) {
   const { folders, people } = useApp();
+  const facePhotoInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedFolders, setSelectedFolders] = useState<string[]>([]);
   const [dateRange, setDateRange] = useState("any");
   const [facePresence, setFacePresence] = useState("any");
   const [selectedPeople, setSelectedPeople] = useState<{ id: string; name: string; mode: string }[]>([]);
+  const [facePhotoPath, setFacePhotoPath] = useState<string | null>(null);
+  const [facePhotoName, setFacePhotoName] = useState<string | null>(null);
+  const [isUploadingFacePhoto, setIsUploadingFacePhoto] = useState(false);
 
   const handleApply = () => {
     const labels: string[] = [];
@@ -34,6 +39,7 @@ export function AdvancedFiltersDrawer({ open, onOpenChange, onApply }: Props) {
     if (dateRange !== "any") labels.push(`Date: ${dateRange}`);
     if (facePresence !== "any") labels.push(facePresence === "faces" ? "Contains faces" : "No faces");
     selectedPeople.forEach(p => labels.push(`${p.mode}: ${p.name}`));
+    if (facePhotoName) labels.push(`Face photo: ${facePhotoName}`);
     onApply({
       labels,
       folders: selectedFolders,
@@ -44,7 +50,7 @@ export function AdvancedFiltersDrawer({ open, onOpenChange, onApply }: Props) {
         name: person.name,
         preference: person.mode === "Must include" ? "must_include" : person.mode === "Exclude" ? "exclude" : "prefer",
       })),
-      facePhotoPath: null,
+      facePhotoPath,
     });
   };
 
@@ -53,6 +59,8 @@ export function AdvancedFiltersDrawer({ open, onOpenChange, onApply }: Props) {
     setDateRange("any");
     setFacePresence("any");
     setSelectedPeople([]);
+    setFacePhotoPath(null);
+    setFacePhotoName(null);
   };
 
   const toggleFolder = (path: string) => {
@@ -64,6 +72,18 @@ export function AdvancedFiltersDrawer({ open, onOpenChange, onApply }: Props) {
   const addPerson = (person: { id: string; name: string }) => {
     if (!selectedPeople.find(p => p.id === person.id)) {
       setSelectedPeople(prev => [...prev, { ...person, mode: "Must include" }]);
+    }
+  };
+
+  const handleFacePhotoFile = async (file: File | undefined) => {
+    if (!file) return;
+    setIsUploadingFacePhoto(true);
+    try {
+      const uploaded = await uploadFaceSearchPhoto(file);
+      setFacePhotoPath(uploaded.path);
+      setFacePhotoName(uploaded.filename || file.name);
+    } finally {
+      setIsUploadingFacePhoto(false);
     }
   };
 
@@ -169,10 +189,56 @@ export function AdvancedFiltersDrawer({ open, onOpenChange, onApply }: Props) {
           {/* Face photo search */}
           <div>
             <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 block">Face Photo Search</Label>
-            <div className="border border-dashed border-border rounded-lg p-6 flex flex-col items-center gap-2">
-              <Upload className="w-5 h-5 text-muted-foreground" />
-              <p className="text-xs text-muted-foreground">Upload a photo to find matching faces</p>
-              <Button variant="outline" size="sm" className="text-xs h-7">Choose photo</Button>
+            <div
+              className="border border-dashed border-border rounded-lg p-6 flex flex-col items-center gap-2"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                void handleFacePhotoFile(event.dataTransfer.files?.[0]);
+              }}
+            >
+              {isUploadingFacePhoto ? (
+                <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
+              ) : (
+                <Upload className="w-5 h-5 text-muted-foreground" />
+              )}
+              <p className="text-xs text-muted-foreground">
+                {facePhotoName ? facePhotoName : "Upload a photo to find matching faces"}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-7"
+                  disabled={isUploadingFacePhoto}
+                  onClick={() => facePhotoInputRef.current?.click()}
+                >
+                  Choose photo
+                </Button>
+                {facePhotoPath && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-xs h-7"
+                    onClick={() => {
+                      setFacePhotoPath(null);
+                      setFacePhotoName(null);
+                    }}
+                  >
+                    Remove
+                  </Button>
+                )}
+              </div>
+              <input
+                ref={facePhotoInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(event) => {
+                  void handleFacePhotoFile(event.target.files?.[0]);
+                  event.currentTarget.value = "";
+                }}
+              />
             </div>
           </div>
         </div>
