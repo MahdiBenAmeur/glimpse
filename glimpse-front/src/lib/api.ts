@@ -64,6 +64,15 @@ export interface StorageSummary {
   thumbnailCacheBytes: number;
 }
 
+export interface ModelDownloadStatus {
+  modelId: string;
+  status: "idle" | "downloading" | "complete" | "error";
+  progress: number;
+  downloadedBytes: number;
+  totalBytes: number;
+  error?: string | null;
+}
+
 export interface SearchRequestPayload {
   query: string;
   folders?: string[];
@@ -225,6 +234,18 @@ export async function downloadModel(modelId: string): Promise<ModelInfo> {
     method: "POST",
     body: JSON.stringify({ modelId }),
   }));
+}
+
+export async function getModelDownloadStatus(modelId: string): Promise<ModelDownloadStatus> {
+  const raw = await apiRequest<any>(`/api/index/models/download-status/${modelId}`);
+  return {
+    modelId: String(raw.modelId ?? modelId),
+    status: raw.status,
+    progress: Number(raw.progress ?? 0),
+    downloadedBytes: Number(raw.downloadedBytes ?? 0),
+    totalBytes: Number(raw.totalBytes ?? 0),
+    error: raw.error ?? null,
+  };
 }
 
 export async function activateModel(modelId: string): Promise<ModelInfo> {

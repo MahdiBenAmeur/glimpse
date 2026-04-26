@@ -311,9 +311,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [setBackgroundIndexingHidden]);
 
   const downloadModel = useCallback(async (id: string) => {
-    let progress = 0;
-    const interval = window.setInterval(() => {
-      progress = Math.min(94, progress + Math.round(Math.random() * 16 + 4));
+    const setDownloadProgress = (progress: number) => {
       setState((prev) => ({
         ...prev,
         models: prev.models.map((model) => (
@@ -322,13 +320,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
             : model
         )),
       }));
-    }, 300);
+    };
+
+    setDownloadProgress(0);
+    const interval = window.setInterval(() => {
+      void api.getModelDownloadStatus(id)
+        .then((status) => {
+          setDownloadProgress(status.progress);
+        })
+        .catch(() => {
+          // Ignore transient polling failures while the main download request is in flight.
+        });
+    }, 700);
 
     try {
       await withBusy(
         "Downloading model...",
         async () => {
           await api.downloadModel(id);
+          setDownloadProgress(100);
           await refreshData();
         },
         { successMessage: "Model downloaded." },

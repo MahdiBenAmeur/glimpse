@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from backend.config import DATA_DIR, FACE_VS_PATH, IMAGE_VS_PATH, MODEL_STATE_PATH, PERSON_VS_PATH, THUMBNAIL_CACHE_DIR
+from backend.config import DATA_DIR, FACE_VS_PATH, IMAGE_VS_PATH, MODEL_STATE_PATH, PERSON_VS_PATH, THUMBNAIL_CACHE_DIR, models_cache_dir
 from backend.core.indexing.index import index_batch
 from backend.core.models.faces.store import finalize_face_clusters, reset_face_vector_stores, save_face_vector_stores
 from backend.core.models.vision_language.base import BaseEmbeddingModel
@@ -84,6 +84,15 @@ class DownloadModelRequest(BaseModel):
     modelId: str
 
 
+class ModelDownloadStatusResponse(BaseModel):
+    modelId: str
+    status: Literal["idle", "downloading", "complete", "error"]
+    progress: int
+    downloadedBytes: int
+    totalBytes: int
+    error: str | None = None
+
+
 class StorageSummaryResponse(BaseModel):
     indexPath: str
     indexSizeBytes: int
@@ -127,8 +136,10 @@ MODEL_CATALOG: list[dict[str, Any]] = [
 _model_map = {entry["id"]: entry for entry in MODEL_CATALOG}
 _embedding_model_cache: dict[str, BaseEmbeddingModel] = {}
 _download_state_cache: dict[str, bool] = {}
+_download_progress_cache: dict[str, dict[str, Any]] = {}
 _indexing_thread: threading.Thread | None = None
 _state_lock = threading.Lock()
+_download_lock = threading.Lock()
 _index_state: dict[str, Any] = {
     "phase": "idle",
     "progress": 0,
@@ -219,6 +230,73 @@ def _is_model_downloaded(model_id: str) -> bool:
 
 def _set_model_downloaded(model_id: str, downloaded: bool) -> None:
     _download_state_cache[model_id] = downloaded
+
+
+def _parse_size_bytes(size_text: str) -> int:
+    parts = size_text.strip().split()
+    if len(parts) != 2:
+        return 0
+    try:
+        value = float(parts[0])
+    except ValueError:
+        return 0
+    unit = parts[1].lower()
+    multipliers = {
+        "kb": 1024,
+        "mb": 1024**2,
+        "gb": 1024**3,
+    }
+    return int(value * multipliers.get(unit, 0))
+
+
+def _model_repo_cache_dir(model: BaseEmbeddingModel) -> Path:
+    cache_name = f"models--{model.CKPT.replace('/', '--')}"
+    return Path(models_cache_dir) / cache_name
+
+
+def _model_cache_size_bytes(model: BaseEmbeddingModel) -> int:
+    repo_cache_dir = _model_repo_cache_dir(model)
+    blobs_dir = repo_cache_dir / "blobs"
+    target = blobs_dir if blobs_dir.exists() else repo_cache_dir
+    if not target.exists():
+        return 0
+    total = 0
+    for file_path in target.rglob("*"):
+        if file_path.is_file():
+            try:
+                total += int(file_path.stat().st_size)
+            except OSError:
+                continue
+    return total
+
+
+def _progress_from_bytes(downloaded_bytes: int, total_bytes: int, *, complete: bool = False) -> int:
+    if complete:
+        return 100
+    if total_bytes <= 0:
+        return 0
+    return max(0, min(99, int((downloaded_bytes / total_bytes) * 100)))
+
+
+def _set_download_progress(model_id: str, **fields: Any) -> None:
+    with _download_lock:
+        current = {
+            "modelId": model_id,
+            "status": "idle",
+            "progress": 0,
+            "downloadedBytes": 0,
+            "totalBytes": 0,
+            "error": None,
+        }
+        current.update(_download_progress_cache.get(model_id, {}))
+        current.update(fields)
+        _download_progress_cache[model_id] = current
+
+
+def _get_download_progress(model_id: str) -> dict[str, Any] | None:
+    with _download_lock:
+        status = _download_progress_cache.get(model_id)
+        return dict(status) if status is not None else None
 
 
 def _warm_active_model(model_id: str) -> None:
@@ -557,6 +635,50 @@ def read_models() -> list[dict[str, Any]]:
     return [_model_to_response(model_entry, active=model_entry["id"] == _active_model_id) for model_entry in MODEL_CATALOG]
 
 
+@router.get("/models/download-status/{model_id}", response_model=ModelDownloadStatusResponse)
+def read_model_download_status(model_id: str) -> dict[str, Any]:
+    model_entry = _model_map.get(model_id)
+    if model_entry is None:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    status = _get_download_progress(model_id)
+    if status is None:
+        if _is_model_downloaded(model_id):
+            total_bytes = _parse_size_bytes(model_entry["diskSize"])
+            return {
+                "modelId": model_id,
+                "status": "complete",
+                "progress": 100,
+                "downloadedBytes": total_bytes,
+                "totalBytes": total_bytes,
+                "error": None,
+            }
+        total_bytes = _parse_size_bytes(model_entry["diskSize"])
+        return {
+            "modelId": model_id,
+            "status": "idle",
+            "progress": 0,
+            "downloadedBytes": 0,
+            "totalBytes": total_bytes,
+            "error": None,
+        }
+
+    if status["status"] == "downloading":
+        model = get_embedding_model(model_id)
+        downloaded_bytes = _model_cache_size_bytes(model)
+        total_bytes = int(status.get("totalBytes") or _parse_size_bytes(model_entry["diskSize"]))
+        progress = _progress_from_bytes(downloaded_bytes, total_bytes)
+        _set_download_progress(
+            model_id,
+            downloadedBytes=downloaded_bytes,
+            totalBytes=total_bytes,
+            progress=progress,
+        )
+        status = _get_download_progress(model_id) or status
+
+    return status
+
+
 @router.post("/models/activate", response_model=ModelInfo)
 def activate_model(payload: ActivateModelRequest) -> dict[str, Any]:
     global _active_model_id
@@ -581,12 +703,39 @@ def download_model(payload: DownloadModelRequest) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Model not found")
 
     model = get_embedding_model(payload.modelId)
+    total_bytes = _parse_size_bytes(model_entry["diskSize"])
+    current_bytes = _model_cache_size_bytes(model)
+    _set_download_progress(
+        payload.modelId,
+        status="downloading",
+        progress=_progress_from_bytes(current_bytes, total_bytes),
+        downloadedBytes=current_bytes,
+        totalBytes=total_bytes,
+        error=None,
+    )
     try:
         model.download_model()
     except Exception as exc:
+        _set_download_progress(
+            payload.modelId,
+            status="error",
+            progress=_progress_from_bytes(_model_cache_size_bytes(model), total_bytes),
+            downloadedBytes=_model_cache_size_bytes(model),
+            totalBytes=total_bytes,
+            error=str(exc),
+        )
         raise HTTPException(status_code=500, detail=f"Model download failed: {exc}") from exc
 
     _set_model_downloaded(payload.modelId, True)
+    downloaded_bytes = max(_model_cache_size_bytes(model), total_bytes)
+    _set_download_progress(
+        payload.modelId,
+        status="complete",
+        progress=100,
+        downloadedBytes=downloaded_bytes,
+        totalBytes=total_bytes,
+        error=None,
+    )
     return _model_to_response(model_entry, active=model_entry["id"] == _active_model_id)
 
 
