@@ -19,3 +19,14 @@ test.py
 electron/node_modules
 glimpse.db
 hello
+
+
+desktop_app
+venv
+dist
+build
+glimpse
+commends
+test.py
+gpu_venv
+electron

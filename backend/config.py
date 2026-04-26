@@ -2,6 +2,7 @@ import torch
 from pathlib import Path
 
 from platformdirs import user_config_dir , user_cache_dir
+import os
 
 APP_NAME = "Glimpse"
 APP_AUTHOR = "Glimpse_one"
@@ -11,7 +12,8 @@ CACHE_DIR = Path(user_cache_dir(APP_NAME, APP_AUTHOR))
 
 DATA_DIR = Path("backend/data")
 CACHE_DIR = Path("backend/data")
-
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(CACHE_DIR, exist_ok=True)
 # Backwards-compatible aliases used by model loaders.
 data_dir = DATA_DIR
 cache_dir = CACHE_DIR
