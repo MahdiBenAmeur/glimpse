@@ -19,7 +19,7 @@ export function getDefaultIndexBatchSize(modelId?: string | null): number {
   return DEFAULT_INDEX_BATCH_SIZE;
 }
 
-type IndexingPhase = "idle" | "scanning" | "embeddings" | "faces" | "thumbnails" | "writing" | "complete";
+type IndexingPhase = "idle" | "scanning" | "embeddings" | "faces" | "clustering" | "thumbnails" | "writing" | "cancelling" | "cancelled" | "complete";
 
 export interface IndexingStatus {
   phase: IndexingPhase;
@@ -71,6 +71,13 @@ export interface ModelDownloadStatus {
   downloadedBytes: number;
   totalBytes: number;
   error?: string | null;
+}
+
+export interface PersonMergeResult {
+  targetPersonId: string;
+  sourcePersonId: string;
+  imageCount: number;
+  name: string | null;
 }
 
 export interface SearchRequestPayload {
@@ -317,6 +324,13 @@ export async function startIndexing(payload: {
   return mapIndexSummary(raw);
 }
 
+export async function cancelIndexing(): Promise<IndexingStatus> {
+  return mapIndexingStatus(await apiRequest<any>("/api/index/cancel", {
+    method: "POST",
+    body: JSON.stringify({}),
+  }));
+}
+
 export async function searchImages(payload: SearchRequestPayload): Promise<ImageResult[]> {
   const raw = await apiRequest<any>("/api/search/", {
     method: "POST",
@@ -388,6 +402,20 @@ export async function renamePerson(personId: string, name: string): Promise<void
     method: "PATCH",
     body: JSON.stringify({ name }),
   });
+}
+
+export async function mergePeople(targetPersonId: string, sourcePersonId: string): Promise<PersonMergeResult> {
+  const raw = await apiRequest<any>(`/api/people/${targetPersonId}/merge`, {
+    method: "POST",
+    body: JSON.stringify({ sourcePersonId: Number(sourcePersonId) }),
+  });
+
+  return {
+    targetPersonId: String(raw.targetPersonId ?? targetPersonId),
+    sourcePersonId: String(raw.sourcePersonId ?? sourcePersonId),
+    imageCount: Number(raw.imageCount ?? 0),
+    name: raw.name ?? null,
+  };
 }
 
 export async function getPersonImages(personId: string, options?: { skip?: number; limit?: number }): Promise<ImageResult[]> {

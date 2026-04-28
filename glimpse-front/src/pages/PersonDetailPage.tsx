@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Edit2, Trash2, Search } from "lucide-react";
+import { ArrowLeft, Edit2, GitMerge, Trash2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useApp } from "@/contexts/AppContext";
 import { ResultsGrid } from "@/components/search/ResultsGrid";
 import { getPersonImages } from "@/lib/api";
@@ -14,7 +14,7 @@ const PERSON_IMAGES_PAGE_SIZE = 20;
 export default function PersonDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { people, renamePerson } = useApp();
+  const { people, renamePerson, mergePerson, isWorking } = useApp();
   const person = people.find(p => p.id === id);
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(person?.name || "");
@@ -22,54 +22,70 @@ export default function PersonDetailPage() {
   const [isLoadingImages, setIsLoadingImages] = useState(true);
   const [isLoadingMoreImages, setIsLoadingMoreImages] = useState(false);
   const [hasMoreImages, setHasMoreImages] = useState(true);
+  const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
+  const [selectedMergePersonId, setSelectedMergePersonId] = useState("");
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const loadingMoreRef = useRef(false);
 
-  useEffect(() => {
+  const loadFirstPageImages = useCallback(async (isCancelled: () => boolean = () => false) => {
     if (!id) return;
-    let cancelled = false;
     setPersonImages([]);
     setHasMoreImages(true);
     setIsLoadingImages(true);
+    loadingMoreRef.current = false;
 
-    void getPersonImages(id, { skip: 0, limit: PERSON_IMAGES_PAGE_SIZE })
-      .then((images) => {
-        if (cancelled) return;
-        setPersonImages(images);
-        setHasMoreImages(images.length === PERSON_IMAGES_PAGE_SIZE);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setPersonImages([]);
-        setHasMoreImages(false);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setIsLoadingImages(false);
-        }
-      });
+    try {
+      const images = await getPersonImages(id, { skip: 0, limit: PERSON_IMAGES_PAGE_SIZE });
+      if (isCancelled()) return;
+      setPersonImages(images);
+      setHasMoreImages(images.length === PERSON_IMAGES_PAGE_SIZE);
+    } catch {
+      if (isCancelled()) return;
+      setPersonImages([]);
+      setHasMoreImages(false);
+    } finally {
+      if (!isCancelled()) {
+        setIsLoadingImages(false);
+      }
+    }
+  }, [id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadFirstPageImages(() => cancelled);
 
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [loadFirstPageImages]);
 
   const loadMoreImages = useCallback(async () => {
-    if (!id || isLoadingImages || isLoadingMoreImages || !hasMoreImages) return;
+    if (!id || isLoadingImages || loadingMoreRef.current || !hasMoreImages) return;
 
+    loadingMoreRef.current = true;
     setIsLoadingMoreImages(true);
     try {
       const nextImages = await getPersonImages(id, {
         skip: personImages.length,
         limit: PERSON_IMAGES_PAGE_SIZE,
       });
-      setPersonImages((current) => [...current, ...nextImages]);
+      setPersonImages((current) => {
+        const seen = new Set(current.map((image) => image.id));
+        const uniqueNextImages = nextImages.filter((image) => {
+          if (seen.has(image.id)) return false;
+          seen.add(image.id);
+          return true;
+        });
+        return [...current, ...uniqueNextImages];
+      });
       setHasMoreImages(nextImages.length === PERSON_IMAGES_PAGE_SIZE);
     } catch {
       setHasMoreImages(false);
     } finally {
+      loadingMoreRef.current = false;
       setIsLoadingMoreImages(false);
     }
-  }, [hasMoreImages, id, isLoadingImages, isLoadingMoreImages, personImages.length]);
+  }, [hasMoreImages, id, isLoadingImages, personImages.length]);
 
   useEffect(() => {
     const target = loadMoreRef.current;
@@ -87,6 +103,18 @@ export default function PersonDetailPage() {
     observer.observe(target);
     return () => observer.disconnect();
   }, [hasMoreImages, isLoadingImages, isLoadingMoreImages, loadMoreImages]);
+
+  const namedMergePeople = people.filter((candidate) => (
+    candidate.id !== id && Boolean(candidate.name?.trim())
+  ));
+
+  const handleMergePerson = async () => {
+    if (!id || !selectedMergePersonId) return;
+    await mergePerson(id, selectedMergePersonId);
+    setMergeDialogOpen(false);
+    setSelectedMergePersonId("");
+    await loadFirstPageImages();
+  };
 
   if (!person) {
     return (
@@ -132,13 +160,24 @@ export default function PersonDetailPage() {
           ) : (
             <h1 className="text-xl font-semibold text-foreground mb-1">{person.name || "Unnamed"}</h1>
           )}
-          <p className="text-xs text-muted-foreground">{person.imageCount} photos • Last seen {person.lastSeen}</p>
+          <p className="text-xs text-muted-foreground">{person.imageCount} photos - Last seen {person.lastSeen}</p>
           <div className="flex items-center gap-2 mt-3">
             <Button variant="outline" size="sm" className="text-xs h-7 gap-1" onClick={() => setIsEditing(true)}>
               <Edit2 className="w-3 h-3" /> Rename
             </Button>
             <Button variant="outline" size="sm" className="text-xs h-7 gap-1">
               <Search className="w-3 h-3" /> Search
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs h-7 gap-1"
+              onClick={() => {
+                setSelectedMergePersonId("");
+                setMergeDialogOpen(true);
+              }}
+            >
+              <GitMerge className="w-3 h-3" /> Merge
             </Button>
             <Button variant="ghost" size="sm" className="text-xs h-7 gap-1 text-destructive hover:text-destructive">
               <Trash2 className="w-3 h-3" /> Delete
@@ -162,6 +201,62 @@ export default function PersonDetailPage() {
           {isLoadingMoreImages && <SkeletonGrid count={5} />}
         </>
       )}
+
+      <Dialog open={mergeDialogOpen} onOpenChange={setMergeDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-base">Merge with another person</DialogTitle>
+            <DialogDescription className="text-xs">
+              Pick a named person to merge into {person.name || "this person"}. The current person will be kept.
+            </DialogDescription>
+          </DialogHeader>
+
+          {namedMergePeople.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border p-5 text-center text-xs text-muted-foreground">
+              No other named people are available to merge yet.
+            </div>
+          ) : (
+            <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+              {namedMergePeople.map((candidate) => {
+                const selected = selectedMergePersonId === candidate.id;
+                return (
+                  <button
+                    key={candidate.id}
+                    type="button"
+                    onClick={() => setSelectedMergePersonId(candidate.id)}
+                    className={`flex w-full items-center gap-3 rounded-lg border p-2 text-left transition ${
+                      selected ? "border-primary bg-primary/10" : "border-border hover:bg-muted/60"
+                    }`}
+                  >
+                    <img
+                      src={candidate.faceUrl}
+                      alt={candidate.name || "Named person"}
+                      className="h-10 w-10 rounded-full object-cover ring-1 ring-border"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-foreground">{candidate.name}</p>
+                      <p className="text-xs text-muted-foreground">{candidate.imageCount} photos</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setMergeDialogOpen(false)} disabled={isWorking}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleMergePerson}
+              disabled={!selectedMergePersonId || isWorking}
+            >
+              Merge
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

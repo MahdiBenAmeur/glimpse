@@ -7,7 +7,6 @@ from typing import Sequence
 import numpy as np
 from PIL import Image
 
-from backend.config import FACE_MERGE_THRESHOLD
 from backend.core.models.faces.detector import crop_faces, detect_faces
 from backend.core.models.faces.embedding import embed_faces
 from backend.core.models.faces.store import load_face_vector_store, load_person_vector_store
@@ -141,24 +140,16 @@ def _collect_face_photo_scores(face_results: list[dict]) -> dict[str, float]:
     image_path_2_score: dict[str, float] = {}
 
     for face_result in face_results:
-        match_type = face_result.get("match_type")
         matches = face_result.get("matches", [])
 
-        if match_type == "person":
-            for match in matches:
-                normalized_score = _normalize_similarity(match.get("score", 0.0))
-                for image_path in match.get("image_paths", []):
-                    current_score = image_path_2_score.get(image_path, float("-inf"))
-                    image_path_2_score[image_path] = max(current_score, normalized_score)
-        else:
-            for match in matches:
-                image_path = match.get("image_path")
-                if not image_path:
-                    continue
+        for match in matches:
+            image_path = match.get("image_path")
+            if not image_path:
+                continue
 
-                normalized_score = _normalize_similarity(match.get("score", 0.0))
-                current_score = image_path_2_score.get(image_path, float("-inf"))
-                image_path_2_score[image_path] = max(current_score, normalized_score)
+            normalized_score = _normalize_similarity(match.get("score", 0.0))
+            current_score = image_path_2_score.get(image_path, float("-inf"))
+            image_path_2_score[image_path] = max(current_score, normalized_score)
 
     return image_path_2_score
 
@@ -177,27 +168,6 @@ def _collect_image_matches(scores: np.ndarray, ids: np.ndarray, image_meta_data:
                 "score": float(score),
                 "image_path": meta_entry.get("image_path"),
                 "created_at": meta_entry.get("created_at"),
-            }
-        )
-    return matches
-
-
-def _collect_person_matches(scores: np.ndarray, ids: np.ndarray, person_meta_data: dict) -> list[dict]:
-    matches = []
-    for score, person_id in zip(scores[0], ids[0]):
-        person_id = int(person_id)
-        if person_id < 0:
-            continue
-
-        meta_entry = person_meta_data.get(str(person_id), {})
-        matches.append(
-            {
-                "person_id": person_id,
-                "score": float(score),
-                "count": meta_entry.get("count"),
-                "image_paths": meta_entry.get("image_paths", []),
-                "image_created_ats": meta_entry.get("image_created_ats", []),
-                "face_boxes": meta_entry.get("face_boxes", []),
             }
         )
     return matches
@@ -276,9 +246,8 @@ def search_by_face(image_path: str | Path, top_k: int = 10) -> list[dict]:
     if query_embeddings is None or query_embeddings.numel() == 0:
         return []
 
-    person_vs, person_meta_data = load_person_vector_store()
     face_vs, face_meta_data = load_face_vector_store()
-    if person_vs.ntotal == 0 and face_vs.ntotal == 0:
+    if face_vs.ntotal == 0:
         return []
 
     results = []
@@ -293,22 +262,9 @@ def search_by_face(image_path: str | Path, top_k: int = 10) -> list[dict]:
             "matches": [],
         }
 
-        if person_vs.ntotal > 0:
-            person_k = min(top_k, int(person_vs.ntotal))
-            person_scores, person_ids = person_vs.search(row, k=person_k)
-            best_person_id = int(person_ids[0][0])
-            best_person_score = float(person_scores[0][0]) if best_person_id >= 0 else float("-inf")
-
-            if best_person_score >= FACE_MERGE_THRESHOLD:
-                result["match_type"] = "person"
-                result["matches"] = _collect_person_matches(person_scores, person_ids, person_meta_data)
-                results.append(result)
-                continue
-
-        if face_vs.ntotal > 0:
-            face_k = min(top_k, int(face_vs.ntotal))
-            face_scores, face_ids = face_vs.search(row, k=face_k)
-            result["matches"] = _collect_face_matches(face_scores, face_ids, face_meta_data)
+        face_k = min(top_k, int(face_vs.ntotal))
+        face_scores, face_ids = face_vs.search(row, k=face_k)
+        result["matches"] = _collect_face_matches(face_scores, face_ids, face_meta_data)
 
         results.append(result)
 
@@ -370,12 +326,11 @@ def global_search(
     text_scores, image_ids = image_vs.search(embedding_row(text_embedding), k=all_image_count)
 
     _, face_meta_data = load_face_vector_store()
-    person_vs, _ = load_person_vector_store()
     images_with_faces, image_path_2_person_ids = _build_image_face_context(face_meta_data)
 
     face_photo_scores: dict[str, float] = {}
     if face_photo_path is not None:
-        face_search_k = max(int(person_vs.ntotal), int(len(face_meta_data)), 1)
+        face_search_k = max(int(len(face_meta_data)), 1)
         face_results = search_by_face(face_photo_path, top_k=face_search_k)
         face_photo_scores = _collect_face_photo_scores(face_results)
 

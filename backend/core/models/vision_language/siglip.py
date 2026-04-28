@@ -8,7 +8,6 @@ from PIL import Image
 from transformers import AutoModel, AutoProcessor
 
 from backend.core.models.vision_language.base import BaseEmbeddingModel
-from backend.config import device
 
 
 class SiglipEmbeddingModel(BaseEmbeddingModel):
@@ -21,7 +20,8 @@ class SiglipEmbeddingModel(BaseEmbeddingModel):
 
         processor, model = self.load_model()
         pil_images = [self._to_pil_image(image) for image in images]
-        inputs = processor(images=pil_images, return_tensors="pt" , device=device)
+        inputs = processor(images=pil_images, return_tensors="pt")
+        inputs = self._move_inputs_to_device(inputs)
 
         with torch.inference_mode():
             image_features = model.get_image_features(**inputs)
@@ -38,7 +38,7 @@ class SiglipEmbeddingModel(BaseEmbeddingModel):
             truncation=True,
             return_tensors="pt",
         )
-        inputs = {name: tensor.to(device) for name, tensor in inputs.items()}
+        inputs = self._move_inputs_to_device(inputs)
 
         with torch.inference_mode():
             text_features = model.get_text_features(**inputs)

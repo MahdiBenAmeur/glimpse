@@ -28,7 +28,7 @@ from backend.utils.vector_store_utils import delete_vs
 
 router = APIRouter(prefix="/index", tags=["index"])
 
-IndexPhase = Literal["idle", "scanning", "embeddings", "faces", "thumbnails", "writing", "complete"]
+IndexPhase = Literal["idle", "scanning", "embeddings", "faces", "clustering", "thumbnails", "writing", "cancelling", "cancelled", "complete"]
 DEFAULT_INDEX_BATCH_SIZE = 32
 SIGLIP2_LARGE_MODEL_ID = "siglip2-large-patch16-384"
 SIGLIP2_LARGE_BATCH_SIZE = 8
@@ -138,6 +138,8 @@ _embedding_model_cache: dict[str, BaseEmbeddingModel] = {}
 _download_state_cache: dict[str, bool] = {}
 _download_progress_cache: dict[str, dict[str, Any]] = {}
 _indexing_thread: threading.Thread | None = None
+_indexing_starting = False
+_cancel_index_event = threading.Event()
 _state_lock = threading.Lock()
 _download_lock = threading.Lock()
 _index_state: dict[str, Any] = {
@@ -378,6 +380,10 @@ def _set_state(**kwargs: Any) -> None:
         _index_state.update(kwargs)
 
 
+def _is_cancel_requested() -> bool:
+    return _cancel_index_event.is_set()
+
+
 def _reset_vector_stores() -> None:
     reset_image_vector_store()
     reset_face_vector_stores()
@@ -412,6 +418,49 @@ def _coarse_phase(processed: int, total: int) -> IndexPhase:
     return "writing"
 
 
+def _save_partial_index_state() -> None:
+    save_image_vector_store()
+    save_face_vector_stores()
+
+
+def _finish_cancelled_index_job(
+    *,
+    total_files: int,
+    processed_count: int,
+    faces_detected: int,
+    skipped_count: int,
+    current_file: str | None,
+    session: Session | None = None,
+    folder_records: dict[str, Folder] | None = None,
+) -> None:
+    if session is not None and folder_records is not None:
+        for folder_record in folder_records.values():
+            if folder_record.status == "scanning":
+                folder_record.status = "ready"
+                session.add(folder_record)
+        session.commit()
+
+    _log_index_api(
+        "Saving partial vector stores after cancellation",
+        processed_count=processed_count,
+        total_files=total_files,
+        faces_detected=faces_detected,
+    )
+    _save_partial_index_state()
+    progress = int(round((processed_count / total_files) * 100)) if total_files else 0
+    _set_state(
+        phase="cancelled",
+        progress=progress,
+        total=total_files,
+        processed=processed_count,
+        facesDetected=faces_detected,
+        skipped=skipped_count,
+        currentFile=current_file,
+        error=None,
+        totalIndexedImages=_count_store_records(IMAGE_VS_PATH),
+    )
+
+
 def _upsert_folder_records(folder_paths: list[Path], *, session: Session) -> dict[str, Folder]:
     existing_by_key: dict[str, Folder] = {}
     for folder in session.exec(select(Folder)).all():
@@ -443,6 +492,12 @@ def _upsert_folder_records(folder_paths: list[Path], *, session: Session) -> dic
 def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, recursive: bool, reset_index: bool) -> None:
     global _indexing_thread
 
+    total_files = 0
+    processed_count = 0
+    faces_detected = 0
+    skipped_count = 0
+    current_file: str | None = None
+
     try:
         _log_index_api(
             "Index job started",
@@ -459,9 +514,19 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
         image_model = get_embedding_model(model_id)
         _log_index_api("Resolved image model for index job", model_id=model_id, model_type=type(image_model).__name__)
         discovered_batches: list[tuple[Path, list[Path]]] = []
-        total_files = 0
 
         for folder_path in folder_paths:
+            if _is_cancel_requested():
+                _finish_cancelled_index_job(
+                    total_files=total_files,
+                    processed_count=processed_count,
+                    faces_detected=faces_detected,
+                    skipped_count=skipped_count,
+                    current_file=current_file,
+                )
+                return
+
+            current_file = str(folder_path)
             files = list_image_files(folder_path, recursive=recursive)
             discovered_batches.append((folder_path, files))
             total_files += len(files)
@@ -479,6 +544,16 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
             indexedPaths=[canonicalize_path(path) for path in folder_paths],
         )
 
+        if _is_cancel_requested():
+            _finish_cancelled_index_job(
+                total_files=total_files,
+                processed_count=processed_count,
+                faces_detected=faces_detected,
+                skipped_count=skipped_count,
+                current_file=current_file,
+            )
+            return
+
         folder_counts = {canonicalize_path_key(folder_path): len(files) for folder_path, files in discovered_batches}
 
         from backend.db_models.database import Session as DBSession, engine
@@ -492,11 +567,19 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
                 session.add(folder_record)
             session.commit()
 
-            processed_count = 0
-            faces_detected = 0
-            skipped_count = 0
-
             for folder_path, files in discovered_batches:
+                if _is_cancel_requested():
+                    _finish_cancelled_index_job(
+                        total_files=total_files,
+                        processed_count=processed_count,
+                        faces_detected=faces_detected,
+                        skipped_count=skipped_count,
+                        current_file=current_file,
+                        session=session,
+                        folder_records=folder_records,
+                    )
+                    return
+
                 _log_index_api("Starting folder indexing", folder_path=str(folder_path), file_count=len(files))
                 if not files:
                     folder_record = folder_records[canonicalize_path_key(folder_path)]
@@ -508,6 +591,18 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
                     continue
 
                 for batch_start in range(0, len(files), batch_size):
+                    if _is_cancel_requested():
+                        _finish_cancelled_index_job(
+                            total_files=total_files,
+                            processed_count=processed_count,
+                            faces_detected=faces_detected,
+                            skipped_count=skipped_count,
+                            current_file=current_file,
+                            session=session,
+                            folder_records=folder_records,
+                        )
+                        return
+
                     batch_paths = files[batch_start : batch_start + batch_size]
                     current_file = str(batch_paths[0]) if batch_paths else str(folder_path)
                     _log_index_api(
@@ -522,6 +617,7 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
                         image_model,
                         batch_size=batch_size,
                         save_after_batch=False,
+                        cancel_check=_is_cancel_requested,
                     )
                     processed_count += int(batch_stats.get("processed_count", 0))
                     skipped_count += int(batch_stats.get("failed_count", 0))
@@ -549,6 +645,18 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
                         currentFile=current_file,
                     )
 
+                    if _is_cancel_requested() or batch_stats.get("cancelled"):
+                        _finish_cancelled_index_job(
+                            total_files=total_files,
+                            processed_count=processed_count,
+                            faces_detected=faces_detected,
+                            skipped_count=skipped_count,
+                            current_file=current_file,
+                            session=session,
+                            folder_records=folder_records,
+                        )
+                        return
+
                 folder_record = folder_records[canonicalize_path_key(folder_path)]
                 folder_record.image_count = folder_counts[canonicalize_path_key(folder_path)]
                 folder_record.last_scan_time = datetime.utcnow()
@@ -557,11 +665,39 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
                 session.commit()
                 _log_index_api("Folder indexing finished", folder_path=str(folder_path), image_count=folder_record.image_count)
 
+        if _is_cancel_requested():
+            _finish_cancelled_index_job(
+                total_files=total_files,
+                processed_count=processed_count,
+                faces_detected=faces_detected,
+                skipped_count=skipped_count,
+                current_file=current_file,
+            )
+            return
+
+        _set_state(
+            phase="clustering",
+            progress=99,
+            total=total_files,
+            processed=processed_count,
+            facesDetected=faces_detected,
+            skipped=skipped_count,
+            currentFile=None,
+        )
         _log_index_api("Finalizing face clusters")
-        final_face_merge_stats = finalize_face_clusters()
+        final_face_merge_stats = finalize_face_clusters(cancel_check=_is_cancel_requested)
+        if _is_cancel_requested() or final_face_merge_stats.get("cancelled"):
+            _finish_cancelled_index_job(
+                total_files=total_files,
+                processed_count=processed_count,
+                faces_detected=faces_detected,
+                skipped_count=skipped_count,
+                current_file=current_file,
+            )
+            return
+
         _log_index_api("Saving vector stores to disk")
-        save_image_vector_store()
-        save_face_vector_stores()
+        _save_partial_index_state()
 
         completed_at = datetime.utcnow().isoformat()
         _set_state(
@@ -754,6 +890,19 @@ def read_index_status() -> dict[str, Any]:
     }
 
 
+@router.post("/cancel", response_model=IndexingStatusResponse)
+def cancel_indexing() -> dict[str, Any]:
+    if _indexing_starting or (_indexing_thread is not None and _indexing_thread.is_alive()):
+        _cancel_index_event.set()
+        _set_state(phase="cancelling", currentFile=None, error=None)
+        _log_index_api("Index cancellation requested")
+    else:
+        _cancel_index_event.clear()
+        _set_state(phase="cancelled", currentFile=None, error=None)
+        _log_index_api("Index cancellation requested with no active job")
+    return read_index_status()
+
+
 @router.get("/summary", response_model=IndexSummaryResponse)
 def read_index_summary(session: Session = Depends(get_session)) -> dict[str, Any]:
     _ensure_active_model_is_available()
@@ -787,73 +936,86 @@ def read_index_summary(session: Session = Depends(get_session)) -> dict[str, Any
 @router.post("/start", response_model=IndexSummaryResponse)
 def start_indexing(payload: StartIndexRequest, session: Session = Depends(get_session)) -> dict[str, Any]:
     global _indexing_thread
+    global _indexing_starting
     global _active_model_id
 
-    if _indexing_thread is not None and _indexing_thread.is_alive():
+    if _indexing_starting or (_indexing_thread is not None and _indexing_thread.is_alive()):
         raise HTTPException(status_code=409, detail="Indexing is already running")
+    _cancel_index_event.clear()
+    _indexing_starting = True
 
-    _log_index_api(
-        "Received start indexing request",
-        requested_model_id=payload.modelId,
-        requested_batch_size=payload.batchSize,
-        recursive=payload.recursive,
-        reset_index=payload.resetIndex,
-        folder_path_count=len(payload.folderPaths),
-        folder_id_count=len(payload.folderIds),
-    )
-    folder_paths = _resolve_folder_paths(payload, session)
-    if not folder_paths:
-        raise HTTPException(status_code=400, detail="No folders available to index")
+    try:
+        _log_index_api(
+            "Received start indexing request",
+            requested_model_id=payload.modelId,
+            requested_batch_size=payload.batchSize,
+            recursive=payload.recursive,
+            reset_index=payload.resetIndex,
+            folder_path_count=len(payload.folderPaths),
+            folder_id_count=len(payload.folderIds),
+        )
+        folder_paths = _resolve_folder_paths(payload, session)
+        if not folder_paths:
+            raise HTTPException(status_code=400, detail="No folders available to index")
 
-    missing_paths = [str(path) for path in folder_paths if not path.exists()]
-    if missing_paths:
-        raise HTTPException(status_code=400, detail={"message": "Some folders do not exist", "paths": missing_paths})
+        missing_paths = [str(path) for path in folder_paths if not path.exists()]
+        if missing_paths:
+            raise HTTPException(status_code=400, detail={"message": "Some folders do not exist", "paths": missing_paths})
 
-    if payload.modelId is not None:
-        if payload.modelId not in _model_map:
-            raise HTTPException(status_code=404, detail="Model not found")
-        if not _is_model_downloaded(payload.modelId):
-            raise HTTPException(status_code=409, detail="Model is not downloaded")
-        _active_model_id = payload.modelId
-        _save_active_model_id(_active_model_id)
-        _warm_active_model(payload.modelId)
-    elif _active_model_id is None:
-        raise HTTPException(status_code=400, detail="Select a model before indexing")
+        _set_state(
+            phase="scanning",
+            progress=0,
+            total=0,
+            processed=0,
+            facesDetected=0,
+            skipped=0,
+            currentFile=str(folder_paths[0]),
+            error=None,
+            indexedPaths=[canonicalize_path(path) for path in folder_paths],
+        )
 
-    resolved_batch_size = payload.batchSize if payload.batchSize is not None else _default_batch_size_for_model(_active_model_id)
-    _log_index_api(
-        "Resolved indexing configuration",
-        active_model_id=_active_model_id,
-        resolved_batch_size=resolved_batch_size,
-        folder_paths=[str(path) for path in folder_paths],
-    )
+        if payload.modelId is not None:
+            if payload.modelId not in _model_map:
+                raise HTTPException(status_code=404, detail="Model not found")
+            if not _is_model_downloaded(payload.modelId):
+                raise HTTPException(status_code=409, detail="Model is not downloaded")
+            _active_model_id = payload.modelId
+            _save_active_model_id(_active_model_id)
+            _warm_active_model(payload.modelId)
+        elif _active_model_id is None:
+            raise HTTPException(status_code=400, detail="Select a model before indexing")
 
-    _set_state(
-        phase="scanning",
-        progress=0,
-        total=0,
-        processed=0,
-        facesDetected=0,
-        skipped=0,
-        currentFile=str(folder_paths[0]),
-        error=None,
-        indexedPaths=[canonicalize_path(path) for path in folder_paths],
-    )
+        if _is_cancel_requested():
+            _set_state(phase="cancelled", currentFile=None, error=None)
+            _indexing_starting = False
+            return read_index_summary(session=session)
 
-    _indexing_thread = threading.Thread(
-        target=_run_index_job,
-        kwargs={
-            "folder_paths": folder_paths,
-            "model_id": _active_model_id,
-            "batch_size": resolved_batch_size,
-            "recursive": payload.recursive,
-            "reset_index": payload.resetIndex,
-        },
-        daemon=True,
-    )
-    _indexing_thread.start()
-    _log_index_api("Background index thread started", thread_name=_indexing_thread.name)
-    return read_index_summary(session=session)
+        resolved_batch_size = payload.batchSize if payload.batchSize is not None else _default_batch_size_for_model(_active_model_id)
+        _log_index_api(
+            "Resolved indexing configuration",
+            active_model_id=_active_model_id,
+            resolved_batch_size=resolved_batch_size,
+            folder_paths=[str(path) for path in folder_paths],
+        )
+
+        _indexing_thread = threading.Thread(
+            target=_run_index_job,
+            kwargs={
+                "folder_paths": folder_paths,
+                "model_id": _active_model_id,
+                "batch_size": resolved_batch_size,
+                "recursive": payload.recursive,
+                "reset_index": payload.resetIndex,
+            },
+            daemon=True,
+        )
+        _indexing_starting = False
+        _indexing_thread.start()
+        _log_index_api("Background index thread started", thread_name=_indexing_thread.name)
+        return read_index_summary(session=session)
+    except Exception:
+        _indexing_starting = False
+        raise
 
 
 @router.post("/reindex", response_model=IndexSummaryResponse)

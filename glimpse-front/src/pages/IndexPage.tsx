@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Database, FolderOpen, Users, Image, Clock, HardDrive, RefreshCw, Plus, Trash2, AlertTriangle, ImagePlus } from "lucide-react";
+import { Database, FolderOpen, Users, Image, Clock, HardDrive, RefreshCw, Plus, Trash2, AlertTriangle, ImagePlus, XCircle, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,13 +15,16 @@ export default function IndexPage() {
     people,
     indexingStatus,
     startIndexing,
+    cancelIndexing,
     removeFolder,
     addFolder,
     addPhotos,
   } = useApp();
   const [indexSizeLabel, setIndexSizeLabel] = useState("0 B");
 
-  const isIndexing = indexingStatus.phase !== "idle" && indexingStatus.phase !== "complete";
+  const isIndexing = indexingStatus.phase !== "idle" && indexingStatus.phase !== "complete" && indexingStatus.phase !== "cancelled";
+  const isCancelling = indexingStatus.phase === "cancelling";
+  const isClustering = indexingStatus.phase === "clustering";
   const handleReindexFolder = (folderId: string) => void startIndexing({ folderIds: [folderId], resetIndex: false });
 
   useEffect(() => {
@@ -75,15 +78,32 @@ export default function IndexPage() {
       {isIndexing && (
         <div className="bg-accent border border-border rounded-xl p-4 mb-6">
           <div className="flex items-center gap-2 mb-2">
-            <RefreshCw className="w-4 h-4 text-primary animate-spin" />
-            <span className="text-sm font-medium text-foreground">Indexing in progress...</span>
+            {isClustering ? (
+              <Loader2 className="w-4 h-4 text-primary animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4 text-primary animate-spin" />
+            )}
+            <span className="text-sm font-medium text-foreground">
+              {isCancelling ? "Cancelling indexing..." : isClustering ? "Clustering faces..." : "Indexing in progress..."}
+            </span>
             <Badge variant="secondary" className="text-[10px]">{indexingStatus.progress}%</Badge>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto h-7 gap-1 text-xs text-muted-foreground"
+              onClick={() => void cancelIndexing()}
+              disabled={isCancelling}
+            >
+              <XCircle className="w-3 h-3" /> {isCancelling ? "Cancelling" : "Cancel"}
+            </Button>
           </div>
           <div className="w-full h-1.5 bg-border rounded-full overflow-hidden">
             <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${indexingStatus.progress}%` }} />
           </div>
           <p className="text-[10px] text-muted-foreground mt-2">
-            {indexingStatus.processed.toLocaleString()} / {indexingStatus.total.toLocaleString()} files - {indexingStatus.facesDetected} faces detected
+            {isClustering
+              ? `We are clustering ${indexingStatus.facesDetected.toLocaleString()} detected faces into people.`
+              : `${indexingStatus.processed.toLocaleString()} / ${indexingStatus.total.toLocaleString()} files - ${indexingStatus.facesDetected} faces detected`}
           </p>
         </div>
       )}

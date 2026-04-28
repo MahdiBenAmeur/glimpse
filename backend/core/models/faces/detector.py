@@ -1,10 +1,32 @@
 from pathlib import Path
+from datetime import datetime
 
+import torch
 from huggingface_hub import hf_hub_download
 from PIL import Image
 from ultralytics import YOLO
 
-from backend.config import DETECTOR_MODEL, FACE_MIN_BOX_SIZE, models_cache_dir , device
+from backend.config import DETECTOR_MODEL, FACE_DETECTION_CONFIDENCE_THRESHOLD, FACE_MIN_BOX_SIZE, models_cache_dir
+
+
+def _log_face_detector(message: str, **fields) -> None:
+    timestamp = datetime.utcnow().isoformat(timespec="seconds")
+    suffix = ""
+    if fields:
+        suffix = " | " + ", ".join(f"{key}={value!r}" for key, value in fields.items())
+    print(f"[{timestamp}] [FACE DETECTOR] {message}{suffix}", flush=True)
+
+
+def _gpu_memory_snapshot() -> dict[str, float | int | str]:
+    if not torch.cuda.is_available():
+        return {"cuda": "unavailable"}
+
+    return {
+        "allocated_mb": round(torch.cuda.memory_allocated() / (1024 * 1024), 2),
+        "reserved_mb": round(torch.cuda.memory_reserved() / (1024 * 1024), 2),
+        "max_allocated_mb": round(torch.cuda.max_memory_allocated() / (1024 * 1024), 2),
+        "max_reserved_mb": round(torch.cuda.max_memory_reserved() / (1024 * 1024), 2),
+    }
 
 def load_face_detector():
     global DETECTOR_MODEL
@@ -21,21 +43,39 @@ def load_face_detector():
     return model
 
 
-def detect_faces(image_paths: list[Path], min_box_size: int = FACE_MIN_BOX_SIZE):
+def detect_faces(
+    image_paths: list[Path],
+    min_box_size: int = FACE_MIN_BOX_SIZE,
+    confidence_threshold: float = FACE_DETECTION_CONFIDENCE_THRESHOLD,
+):
     """
     takes in a list of image paths
     returns a dict mapping each image path to a list of bounding boxes (if any)
     """
     if min_box_size < 0:
         raise ValueError("min_box_size must be greater than or equal to 0")
+    if not 0 <= confidence_threshold <= 1:
+        raise ValueError("confidence_threshold must be between 0 and 1")
 
     model = load_face_detector()
-    results = model.predict(image_paths, save=False)
+    _log_face_detector(
+        "Calling YOLO predict",
+        image_count=len(image_paths),
+        confidence_threshold=confidence_threshold,
+        min_box_size=min_box_size,
+        **_gpu_memory_snapshot(),
+    )
+    results = model.predict(image_paths, save=False, conf=confidence_threshold)
+    _log_face_detector("YOLO predict returned", result_count=len(results), **_gpu_memory_snapshot())
     path_2_boxes = {}
     for image_path, result in zip(image_paths, results):
         if result.boxes is not None:
             filtered_boxes = []
             for box in result.boxes:
+                confidence = float(box.conf[0]) if getattr(box, "conf", None) is not None else 1.0
+                if confidence < confidence_threshold:
+                    continue
+
                 x1, y1, x2, y2 = box.xyxy[0].tolist()
                 width = x2 - x1
                 height = y2 - y1
@@ -44,6 +84,12 @@ def detect_faces(image_paths: list[Path], min_box_size: int = FACE_MIN_BOX_SIZE)
 
             if filtered_boxes:
                 path_2_boxes[image_path] = filtered_boxes
+    _log_face_detector(
+        "Filtered face detections",
+        matched_image_count=len(path_2_boxes),
+        matched_face_count=sum(len(boxes) for boxes in path_2_boxes.values()),
+        **_gpu_memory_snapshot(),
+    )
     return path_2_boxes
 
 def crop_faces(path_2_boxes)-> dict[Path, list[Image.Image]]:

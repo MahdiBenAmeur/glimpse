@@ -2,20 +2,28 @@ import io
 from datetime import datetime
 from pathlib import Path
 import threading
-from typing import Any, List
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session
 
 from backend.db_models.database import get_session
-from backend.core.models.faces.store import load_person_vector_store, save_face_vector_stores
+from backend.core.models.faces.store import load_person_vector_store, merge_people, save_face_vector_stores
 from backend.services.media_service import get_image_dimensions, get_image_taken_at
-from backend.services.library_state_service import find_image_id_by_path, get_image_state
+from backend.services.library_state_service import get_image_state, load_image_meta_data
 from backend.services.person_service import PersonService
 from backend.schemas.person import PersonCreate, PersonUpdate, PersonRead
+from backend.utils.path_utils import canonicalize_path_key
 
 router = APIRouter(prefix="/people", tags=["people"])
+
+
+class PersonMergeRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    source_person_id: int = Field(alias="sourcePersonId")
 
 
 def _log_people_api(message: str, **fields: Any) -> None:
@@ -102,13 +110,28 @@ def read_person_images(
 
     image_paths = entry.get("image_paths", [])
     image_created_ats = entry.get("image_created_ats", [])
-    items = []
-    page_image_paths = image_paths[skip : skip + limit]
-    for relative_index, image_path in enumerate(page_image_paths):
-        index = skip + relative_index
-        image_id = find_image_id_by_path(image_path)
+    image_id_by_path = {
+        canonicalize_path_key(value.get("image_path")): int(key)
+        for key, value in load_image_meta_data().items()
+        if not str(key).startswith("_") and isinstance(value, dict) and value.get("image_path")
+    }
+    seen_image_ids: set[int] = set()
+    items: list[dict[str, Any]] = []
+    unique_seen_count = 0
+
+    for index, image_path in enumerate(image_paths):
+        image_id = image_id_by_path.get(canonicalize_path_key(image_path))
         if image_id is None:
             continue
+
+        if image_id in seen_image_ids:
+            continue
+
+        seen_image_ids.add(image_id)
+        if unique_seen_count < skip:
+            unique_seen_count += 1
+            continue
+
         path = Path(image_path)
         state = get_image_state(image_id)
         width, height = get_image_dimensions(path)
@@ -131,6 +154,11 @@ def read_person_images(
                 "collections": [str(collection_id) for collection_id in state.get("collection_ids", [])],
             }
         )
+        unique_seen_count += 1
+
+        if len(items) >= limit:
+            break
+
     return items
 
 @router.get("/{person_id}/face", name="read_person_face")
@@ -187,6 +215,18 @@ def update_person(person_id: int, person_in: PersonUpdate):
         "id": person_id,
         "name": entry.get("name"),
     }
+
+
+@router.post("/{person_id}/merge")
+def merge_person(person_id: int, payload: PersonMergeRequest):
+    _log_people_api("merge_person called", target_person_id=person_id, source_person_id=payload.source_person_id)
+    try:
+        return merge_people(person_id, payload.source_person_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
 
 @router.delete("/{person_id}")
 def delete_person(person_id: int, session: Session = Depends(get_session)):

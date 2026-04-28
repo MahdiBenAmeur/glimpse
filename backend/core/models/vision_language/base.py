@@ -96,6 +96,16 @@ class BaseEmbeddingModel:
         embeddings = embeddings / embeddings.norm(dim=-1, keepdim=True).clamp_min(1e-12)
         return embeddings.detach().cpu()
 
+    def _move_inputs_to_device(self, inputs):
+        if hasattr(inputs, "to"):
+            return inputs.to(device)
+        if isinstance(inputs, dict):
+            return {
+                name: tensor.to(device) if isinstance(tensor, torch.Tensor) else tensor
+                for name, tensor in inputs.items()
+            }
+        return inputs.to(device) if isinstance(inputs, torch.Tensor) else inputs
+
     def _to_pil_image(self, image: str | Path | Image.Image) -> Image.Image:
         if isinstance(image, Image.Image):
             return image.convert("RGB")

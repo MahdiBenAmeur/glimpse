@@ -1,9 +1,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "@/components/ui/sonner";
 import { type CollectionInfo, type FolderInfo, type ImageResult, type ModelInfo, type PersonInfo, type SavedSearch } from "@/types/app";
+import type { PersonMergeResult } from "@/lib/api";
 import * as api from "@/lib/api";
 
-type IndexingPhase = "idle" | "scanning" | "embeddings" | "faces" | "thumbnails" | "writing" | "complete";
+type IndexingPhase = "idle" | "scanning" | "embeddings" | "faces" | "clustering" | "thumbnails" | "writing" | "cancelling" | "cancelled" | "complete";
 
 interface IndexingStatus {
   phase: IndexingPhase;
@@ -62,9 +63,11 @@ interface AppContextType extends AppState {
   addPhotos: () => Promise<void>;
   removeFolder: (id: string) => Promise<void>;
   startIndexing: (options?: StartIndexingOptions) => Promise<void>;
+  cancelIndexing: () => Promise<void>;
   runInBackground: () => void;
   toggleFavorite: (imageId: string) => void;
   renamePerson: (personId: string, name: string) => Promise<void>;
+  mergePerson: (targetPersonId: string, sourcePersonId: string) => Promise<PersonMergeResult>;
   createCollection: (name: string, description?: string) => Promise<void>;
   deleteCollection: (id: string) => Promise<void>;
   saveSearch: (name: string, query: string, filters: Record<string, unknown>) => Promise<void>;
@@ -97,7 +100,7 @@ function persistUiState(nextState: { hideOnboardingWhileIndexing: boolean }) {
 }
 
 function isIndexingPhase(phase: IndexingPhase) {
-  return phase !== "idle" && phase !== "complete";
+  return phase !== "idle" && phase !== "complete" && phase !== "cancelled";
 }
 
 function deriveOnboardingState(
@@ -521,13 +524,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
         totalIndexedImages: summary.totalIndexedImages,
         onboardingStep: prev.isFirstLaunch ? 2 : prev.onboardingStep,
       }));
-      toast.success("Indexing started.");
+      if (summary.indexingStatus.phase === "cancelled") {
+        toast.info("Indexing cancelled.");
+      } else {
+        toast.success("Indexing started.");
+      }
     } catch (error) {
       toast.error(getErrorMessage(error));
       await refreshData();
       throw error;
     }
   }, [refreshData, setBackgroundIndexingHidden, state.activeModel?.id, state.folders]);
+
+  const cancelIndexing = useCallback(async () => {
+    try {
+      const nextStatus = await api.cancelIndexing();
+      setBackgroundIndexingHidden(false);
+      setState((prev) => {
+        const onboarding = deriveOnboardingState(
+          prev.activeModel,
+          prev.folders,
+          nextStatus,
+          prev.lastIndexedTime,
+          prev.totalIndexedImages,
+          false,
+        );
+
+        return {
+          ...prev,
+          indexingStatus: nextStatus,
+          isFirstLaunch: onboarding.isFirstLaunch,
+          onboardingStep: onboarding.onboardingStep,
+        };
+      });
+
+      if (nextStatus.phase === "cancelled") {
+        toast.info("Indexing cancelled.");
+        await refreshData();
+      } else {
+        toast.info("Cancelling indexing after the current batch...");
+      }
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+      await refreshData();
+      throw error;
+    }
+  }, [refreshData, setBackgroundIndexingHidden]);
 
   const runInBackground = useCallback(() => {
     setBackgroundIndexingHidden(true);
@@ -576,6 +618,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
         await refreshData();
       },
       { successMessage: "Person updated." },
+    );
+  }, [refreshData, withBusy]);
+
+  const mergePerson = useCallback(async (targetPersonId: string, sourcePersonId: string) => {
+    return withBusy(
+      "Merging people...",
+      async () => {
+        const result = await api.mergePeople(targetPersonId, sourcePersonId);
+        await refreshData();
+        return result;
+      },
+      { successMessage: "People merged." },
     );
   }, [refreshData, withBusy]);
 
@@ -679,9 +733,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addPhotos,
       removeFolder,
       startIndexing,
+      cancelIndexing,
       runInBackground,
       toggleFavorite,
       renamePerson,
+      mergePerson,
       createCollection,
       deleteCollection,
       saveSearch,

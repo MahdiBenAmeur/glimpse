@@ -1,6 +1,8 @@
 from datetime import datetime
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
+
+import torch
 
 from backend.core.indexing.index_faces import index_face_batch
 from backend.core.indexing.index_images import index_image_batch
@@ -20,6 +22,18 @@ def _log_indexing(message: str, **fields) -> None:
     if fields:
         suffix = " | " + ", ".join(f"{key}={value!r}" for key, value in fields.items())
     print(f"[{timestamp}] [INDEXING] {message}{suffix}", flush=True)
+
+
+def _gpu_memory_snapshot() -> dict[str, float | int | str]:
+    if not torch.cuda.is_available():
+        return {"cuda": "unavailable"}
+
+    return {
+        "allocated_mb": round(torch.cuda.memory_allocated() / (1024 * 1024), 2),
+        "reserved_mb": round(torch.cuda.memory_reserved() / (1024 * 1024), 2),
+        "max_allocated_mb": round(torch.cuda.max_memory_allocated() / (1024 * 1024), 2),
+        "max_reserved_mb": round(torch.cuda.max_memory_reserved() / (1024 * 1024), 2),
+    }
 
 
 def _dedupe_unindexed_paths(
@@ -61,6 +75,7 @@ def index_batch(
     *,
     batch_size: int = 32,
     save_after_batch: bool = False,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict:
     normalized_paths = coerce_image_paths(image_paths)
     _log_indexing("index_batch started", input_count=len(normalized_paths), batch_size=batch_size, save_after_batch=save_after_batch)
@@ -83,6 +98,11 @@ def index_batch(
         "new_people_count": 0,
     }
 
+    if cancel_check is not None and cancel_check():
+        stats["processed_count"] = 0
+        stats["cancelled"] = True
+        return stats
+
     if not valid_paths:
         _log_indexing("No valid paths after image preparation")
         return stats
@@ -100,11 +120,21 @@ def index_batch(
         _log_indexing("All valid paths were already indexed")
         return stats
 
+    if cancel_check is not None and cancel_check():
+        stats["processed_count"] = 0
+        stats["cancelled"] = True
+        return stats
+
     _log_indexing("Loading models required for batch", model_type=type(image_model).__name__)
     image_model.load_model()
     load_face_detector()
     load_face_embedding_model()
-    _log_indexing("All models loaded for batch")
+    _log_indexing("All models loaded for batch", **_gpu_memory_snapshot())
+
+    if cancel_check is not None and cancel_check():
+        stats["processed_count"] = 0
+        stats["cancelled"] = True
+        return stats
 
     image_stats = index_image_batch(
         image_model,
@@ -117,18 +147,27 @@ def index_batch(
         indexed_count=image_stats.get("indexed_count"),
         failed_count=image_stats.get("failed_count"),
         store_total=image_stats.get("store_total"),
+        **_gpu_memory_snapshot(),
     )
+
+    if cancel_check is not None and cancel_check():
+        stats["image_indexing"] = image_stats
+        stats["cancelled"] = True
+        return stats
+
     face_stats = index_face_batch(
         valid_paths,
         embedding_batch_size=batch_size,
         validate_inputs=False,
         path_2_created_at=path_2_created_at,
+        cancel_check=cancel_check,
     )
     _log_indexing(
         "Face indexing finished for batch",
         detected_face_count=face_stats.get("detected_face_count"),
         indexed_face_count=face_stats.get("indexed_face_count"),
         assigned_person_count=face_stats.get("assigned_person_count"),
+        **_gpu_memory_snapshot(),
     )
 
     stats["image_indexing"] = image_stats
@@ -147,6 +186,7 @@ def index_batch(
         processed_count=stats["processed_count"],
         failed_count=stats["failed_count"],
         new_people_count=stats["new_people_count"],
+        **_gpu_memory_snapshot(),
     )
     return stats
 

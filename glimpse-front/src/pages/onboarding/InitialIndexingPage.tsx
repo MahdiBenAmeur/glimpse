@@ -7,15 +7,19 @@ const phaseLabels: Record<string, string> = {
   scanning: "Scanning folders",
   embeddings: "Generating embeddings",
   faces: "Detecting faces",
+  clustering: "Clustering faces",
   thumbnails: "Creating thumbnails",
   writing: "Writing index",
+  cancelling: "Cancelling after current batch",
+  cancelled: "Indexing cancelled",
   complete: "Indexing complete",
   idle: "Preparing...",
 };
 
 export default function InitialIndexingPage() {
-  const { indexingStatus, runInBackground, completeOnboarding } = useApp();
+  const { indexingStatus, runInBackground, completeOnboarding, cancelIndexing } = useApp();
   const isDone = indexingStatus.phase === "complete";
+  const isCancelling = indexingStatus.phase === "cancelling";
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-8">
@@ -41,6 +45,16 @@ export default function InitialIndexingPage() {
         </div>
 
         <Progress value={indexingStatus.progress} className="h-2 mb-4" />
+
+        {indexingStatus.phase === "clustering" && (
+          <div className="flex items-center justify-center gap-3 rounded-2xl border border-border bg-card px-5 py-4 shadow-sm mb-4">
+            <Loader2 className="w-5 h-5 animate-spin text-primary" />
+            <div className="text-left">
+              <p className="text-sm font-medium text-foreground">Clustering faces</p>
+              <p className="text-xs text-muted-foreground">We are clustering faces into people. This can take a moment.</p>
+            </div>
+          </div>
+        )}
 
         <div className="bg-card border border-border rounded-xl p-4 mb-6">
           <div className="flex items-center justify-center gap-2 mb-4">
@@ -79,7 +93,14 @@ export default function InitialIndexingPage() {
           ) : (
             <>
               <Button variant="outline" onClick={runInBackground}>Run in background</Button>
-              <Button variant="ghost" className="text-muted-foreground">Cancel</Button>
+              <Button
+                variant="ghost"
+                className="text-muted-foreground"
+                onClick={() => void cancelIndexing()}
+                disabled={isCancelling}
+              >
+                {isCancelling ? "Cancelling..." : "Cancel"}
+              </Button>
             </>
           )}
         </div>

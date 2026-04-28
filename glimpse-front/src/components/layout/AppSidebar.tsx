@@ -33,6 +33,7 @@ export function AppSidebar() {
   const indexFresh = lastIndexedTime
     ? (Date.now() - new Date(lastIndexedTime).getTime()) < 86400000
     : false;
+  const isIndexing = indexingStatus.phase !== "idle" && indexingStatus.phase !== "complete" && indexingStatus.phase !== "cancelled";
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
@@ -88,10 +89,10 @@ export function AppSidebar() {
               </div>
             )}
             <div className="flex items-center gap-1.5">
-              <div className={`w-1.5 h-1.5 rounded-full ${indexingStatus.phase !== "idle" && indexingStatus.phase !== "complete" ? "bg-warning animate-pulse" : indexFresh ? "bg-success" : "bg-muted-foreground"}`} />
+              <div className={`w-1.5 h-1.5 rounded-full ${isIndexing ? "bg-warning animate-pulse" : indexFresh ? "bg-success" : "bg-muted-foreground"}`} />
               <span className="text-[10px] text-muted-foreground">
-                {indexingStatus.phase !== "idle" && indexingStatus.phase !== "complete"
-                  ? `Indexing... ${indexingStatus.progress}%`
+                {isIndexing
+                  ? `${indexingStatus.phase === "cancelling" ? "Cancelling" : indexingStatus.phase === "clustering" ? "Clustering faces" : "Indexing"}... ${indexingStatus.progress}%`
                   : indexFresh ? "Index up to date" : "Index outdated"}
               </span>
             </div>

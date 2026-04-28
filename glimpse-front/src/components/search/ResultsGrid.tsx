@@ -23,7 +23,7 @@ export function ResultsGrid({ images }: Props) {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
         {images.map((img, i) => (
           <div
-            key={img.id}
+            key={`${img.id}-${img.path ?? i}`}
             className="group relative rounded-lg overflow-hidden bg-card border border-border cursor-pointer hover:border-primary/30 transition-colors"
             onDoubleClick={() => openViewer(img, i)}
           >
