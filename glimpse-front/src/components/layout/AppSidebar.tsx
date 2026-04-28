@@ -41,9 +41,7 @@ export function AppSidebar() {
         {!collapsed && (
           <div className="px-4 pb-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
-                <Search className="w-3.5 h-3.5 text-primary-foreground" />
-              </div>
+              <img src="/logo.png" alt="Glimpse logo" className="w-7 h-7 rounded-lg object-contain" />
               <span className="font-semibold text-sm text-foreground">Glimpse One</span>
             </div>
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={toggleSidebar}>

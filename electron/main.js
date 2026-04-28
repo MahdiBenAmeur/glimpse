@@ -149,7 +149,8 @@ function createWindow() {
             color: 'rgba(0, 0, 0, 0)',
             symbolColor: '#000000ff',
             height: 30
-        }
+        },
+        icon: path.join(__dirname, '../glimpse-front/public/logo.png')
     })
 
     mainWindow.loadURL(FRONTEND_URL)

@@ -12,9 +12,7 @@ export default function ModelSetupPage() {
     <div className="min-h-screen flex items-center justify-center bg-background p-8">
       <div className="max-w-2xl w-full">
         <div className="text-center mb-8">
-          <div className="w-14 h-14 rounded-2xl bg-primary flex items-center justify-center mx-auto mb-4">
-            <Search className="w-7 h-7 text-primary-foreground" />
-          </div>
+          <img src="/logo.png" alt="Glimpse logo" className="w-24 h-24 rounded-2xl object-contain mx-auto mb-4" />
           <h1 className="text-2xl font-semibold text-foreground mb-2">Welcome to Glimpse One</h1>
           <p className="text-sm text-muted-foreground max-w-md mx-auto">
             Glimpse One runs entirely on your computer. Choose a model to enable natural language image search.
@@ -31,11 +29,10 @@ export default function ModelSetupPage() {
           {models.map(model => (
             <div
               key={model.id}
-              className={`border rounded-xl p-4 transition-colors ${
-                model.status === "active"
-                  ? "border-primary bg-accent"
-                  : "border-border bg-card hover:border-primary/30"
-              }`}
+              className={`border rounded-xl p-4 transition-colors ${model.status === "active"
+                ? "border-primary bg-accent"
+                : "border-border bg-card hover:border-primary/30"
+                }`}
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
