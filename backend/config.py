@@ -14,6 +14,7 @@ DATA_DIR = Path("backend/data")
 CACHE_DIR = Path("backend/data")
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(CACHE_DIR, exist_ok=True)
+
 # Backwards-compatible aliases used by model loaders.
 data_dir = DATA_DIR
 cache_dir = CACHE_DIR

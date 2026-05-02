@@ -2,6 +2,10 @@ from sqlmodel import Session, select
 from backend.db_models.folder import Folder
 from backend.schemas.folder import FolderCreate, FolderUpdate
 from typing import List, Optional
+from pathlib import Path
+from backend.core.models.faces.store import purge_face_entries
+from backend.core.models.vision_language.store import purge_image_entries
+from backend.services.library_state_service import remove_image_states
 from backend.utils.path_utils import canonicalize_path, canonicalize_path_key
 
 
@@ -42,6 +46,25 @@ def _find_existing_folder(session: Session, path: str) -> Folder | None:
         return None
     best_match = max(matches, key=_folder_score)
     return best_match
+
+
+def _path_is_within_folder(image_path: str, folder_path: str) -> bool:
+    resolved_image_path = Path(canonicalize_path(image_path))
+    resolved_folder_path = Path(canonicalize_path(folder_path))
+    try:
+        resolved_image_path.relative_to(resolved_folder_path)
+        return True
+    except ValueError:
+        return False
+
+
+def _purge_indexed_folder_data(folder_path: str) -> None:
+    def matches_folder(image_path: str) -> bool:
+        return _path_is_within_folder(image_path, folder_path)
+
+    image_purge = purge_image_entries(matches_folder)
+    remove_image_states(image_purge.get("removed_ids", []))
+    purge_face_entries(matches_folder)
 
 
 def _collapse_duplicate_folders(session: Session, keep_folder: Folder, *, path: str) -> None:
@@ -108,6 +131,7 @@ class FolderService:
         db_folder = session.get(Folder, folder_id)
         if not db_folder:
             return False
+        _purge_indexed_folder_data(db_folder.path)
         for folder in _find_matching_folders(session, db_folder.path):
             session.delete(folder)
         session.commit()

@@ -24,16 +24,16 @@ import NotFound from "@/pages/NotFound";
 const queryClient = new QueryClient();
 
 function AppRoutes() {
-  const { isFirstLaunch, onboardingStep, isHydrating, isWorking, busyMessage } = useApp();
+  const { isFirstLaunch, onboardingStep, isHydrating, isWorking, busyMessage, showWorkingOverlay } = useApp();
 
   if (isHydrating) {
     return <BootSplash />;
   }
 
   if (isFirstLaunch) {
-    if (onboardingStep === 0) return <><ModelSetupPage />{isWorking && <WorkingOverlay message={busyMessage} />}</>;
-    if (onboardingStep === 1) return <><FolderSelectionPage />{isWorking && <WorkingOverlay message={busyMessage} />}</>;
-    if (onboardingStep === 2) return <><InitialIndexingPage />{isWorking && <WorkingOverlay message={busyMessage} />}</>;
+    if (onboardingStep === 0) return <><ModelSetupPage />{isWorking && showWorkingOverlay && <WorkingOverlay message={busyMessage} />}</>;
+    if (onboardingStep === 1) return <><FolderSelectionPage />{isWorking && showWorkingOverlay && <WorkingOverlay message={busyMessage} />}</>;
+    if (onboardingStep === 2) return <><InitialIndexingPage />{isWorking && showWorkingOverlay && <WorkingOverlay message={busyMessage} />}</>;
   }
 
   return (
@@ -53,7 +53,7 @@ function AppRoutes() {
           <Route path="*" element={<NotFound />} />
         </Routes>
       </AppLayout>
-      {isWorking && <WorkingOverlay message={busyMessage} />}
+      {isWorking && showWorkingOverlay && <WorkingOverlay message={busyMessage} />}
     </>
   );
 }

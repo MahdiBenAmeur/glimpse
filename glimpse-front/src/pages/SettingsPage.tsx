@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTheme } from "@/contexts/ThemeContext";
-import { Download, Check, Loader2, AlertTriangle, HardDrive, FolderOpen } from "lucide-react";
+import { Download, Check, Loader2, AlertTriangle, HardDrive, FolderOpen, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -80,7 +80,7 @@ function GeneralSettings() {
 }
 
 function ModelsSettings() {
-  const { models, activeModel, folders, totalIndexedImages, downloadModel, setActiveModel, switchModelAndRebuild, isWorking } = useApp();
+  const { models, activeModel, folders, totalIndexedImages, downloadModel, setActiveModel, switchModelAndRebuild, removeModel, isWorking } = useApp();
   const [switchDialog, setSwitchDialog] = useState<string | null>(null);
 
   const handleSwitch = (id: string) => {
@@ -142,6 +142,17 @@ function ModelsSettings() {
                 {model.status === "installed" && (
                   <Button size="sm" className="text-xs h-8" onClick={() => handleSwitch(model.id)} disabled={isWorking}>
                     <Check className="w-3 h-3 mr-1.5" /> {activeModel ? "Switch & rebuild" : "Use"}
+                  </Button>
+                )}
+                {(model.status === "installed" || model.status === "active") && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs h-8 text-destructive hover:text-destructive"
+                    onClick={() => void removeModel(model.id)}
+                    disabled={isWorking}
+                  >
+                    <Trash2 className="w-3 h-3 mr-1.5" /> Delete
                   </Button>
                 )}
               </div>

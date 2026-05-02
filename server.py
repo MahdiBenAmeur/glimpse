@@ -1,7 +1,6 @@
 import sys
 import os
 
-# Add the project root to sys.path so 'backend' is recognized as a package
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import FastAPI

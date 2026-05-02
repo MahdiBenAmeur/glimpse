@@ -217,12 +217,9 @@ def get_embedding_model(model_id: str | None = None) -> BaseEmbeddingModel:
 
 
 def _is_model_downloaded(model_id: str) -> bool:
-    cached = _download_state_cache.get(model_id)
-    if cached is not None:
-        return cached
-
     model_entry = _model_map.get(model_id)
     if model_entry is None:
+        _download_state_cache[model_id] = False
         return False
 
     downloaded = model_entry["factory"]().is_model_downloaded()
@@ -232,6 +229,11 @@ def _is_model_downloaded(model_id: str) -> bool:
 
 def _set_model_downloaded(model_id: str, downloaded: bool) -> None:
     _download_state_cache[model_id] = downloaded
+
+
+def _clear_download_progress(model_id: str) -> None:
+    with _download_lock:
+        _download_progress_cache.pop(model_id, None)
 
 
 def _parse_size_bytes(size_text: str) -> int:
@@ -778,17 +780,53 @@ def read_model_download_status(model_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Model not found")
 
     status = _get_download_progress(model_id)
+    is_downloaded = _is_model_downloaded(model_id)
     if status is None:
-        if _is_model_downloaded(model_id):
+        if is_downloaded:
+            model = get_embedding_model(model_id)
             total_bytes = _parse_size_bytes(model_entry["diskSize"])
+            downloaded_bytes = max(_model_cache_size_bytes(model), total_bytes)
             return {
                 "modelId": model_id,
                 "status": "complete",
                 "progress": 100,
-                "downloadedBytes": total_bytes,
+                "downloadedBytes": downloaded_bytes,
                 "totalBytes": total_bytes,
                 "error": None,
             }
+        total_bytes = _parse_size_bytes(model_entry["diskSize"])
+        return {
+            "modelId": model_id,
+            "status": "idle",
+            "progress": 0,
+            "downloadedBytes": 0,
+            "totalBytes": total_bytes,
+            "error": None,
+        }
+
+    if status["status"] != "downloading" and is_downloaded:
+        model = get_embedding_model(model_id)
+        total_bytes = _parse_size_bytes(model_entry["diskSize"])
+        downloaded_bytes = max(_model_cache_size_bytes(model), total_bytes)
+        _set_download_progress(
+            model_id,
+            status="complete",
+            progress=100,
+            downloadedBytes=downloaded_bytes,
+            totalBytes=total_bytes,
+            error=None,
+        )
+        return _get_download_progress(model_id) or {
+            "modelId": model_id,
+            "status": "complete",
+            "progress": 100,
+            "downloadedBytes": downloaded_bytes,
+            "totalBytes": total_bytes,
+            "error": None,
+        }
+
+    if status["status"] != "downloading" and not is_downloaded:
+        _clear_download_progress(model_id)
         total_bytes = _parse_size_bytes(model_entry["diskSize"])
         return {
             "modelId": model_id,
@@ -873,6 +911,34 @@ def download_model(payload: DownloadModelRequest) -> dict[str, Any]:
         error=None,
     )
     return _model_to_response(model_entry, active=model_entry["id"] == _active_model_id)
+
+
+@router.delete("/models/{model_id}")
+def delete_model(model_id: str) -> dict[str, str]:
+    global _active_model_id
+
+    model_entry = _model_map.get(model_id)
+    if model_entry is None:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    if not _is_model_downloaded(model_id):
+        raise HTTPException(status_code=409, detail="Model is not downloaded")
+
+    if model_id == _active_model_id and (_indexing_starting or (_indexing_thread is not None and _indexing_thread.is_alive())):
+        raise HTTPException(status_code=409, detail="Cannot delete the active model while indexing is running")
+
+    cached_model = _embedding_model_cache.pop(model_id, None)
+    model = cached_model or model_entry["factory"]()
+    model.delete_model()
+
+    if model_id == _active_model_id:
+        _active_model_id = None
+        _save_active_model_id(None)
+
+    _set_model_downloaded(model_id, False)
+    _clear_download_progress(model_id)
+
+    return {"modelId": model_id, "status": "deleted"}
 
 
 @router.get("/status", response_model=IndexingStatusResponse)

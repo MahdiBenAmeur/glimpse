@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Sequence
 import torch
@@ -72,6 +73,13 @@ class BaseEmbeddingModel:
         del model
         print("Download complete.", flush=True)
         return Path(models_cache_dir)
+
+    def delete_model(self) -> Path:
+        repo_cache_dir = Path(models_cache_dir) / f"models--{self.CKPT.replace('/', '--')}"
+        self.unload_model()
+        if repo_cache_dir.exists():
+            shutil.rmtree(repo_cache_dir)
+        return repo_cache_dir
 
     def load_model(self):
         if self._processor is not None and self._model is not None:

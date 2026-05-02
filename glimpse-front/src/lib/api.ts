@@ -262,6 +262,12 @@ export async function activateModel(modelId: string): Promise<ModelInfo> {
   }));
 }
 
+export async function deleteModel(modelId: string): Promise<void> {
+  await apiRequest(`/api/index/models/${modelId}`, {
+    method: "DELETE",
+  });
+}
+
 export async function getFolders(): Promise<FolderInfo[]> {
   return (await apiRequest<any[]>("/api/folders/")).map(mapFolder);
 }

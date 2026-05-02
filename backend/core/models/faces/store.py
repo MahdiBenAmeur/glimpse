@@ -719,3 +719,68 @@ def add_faces_to_vector_store(
     stats["face_store_total"] = int(face_vector_store.ntotal)
     stats["person_store_total"] = int(person_vector_store.ntotal)
     return stats
+
+
+def purge_face_entries(match_image_path: Callable[[str], bool]) -> dict[str, Any]:
+    global face_vs, face_meta_data
+
+    if face_vs is None or face_meta_data is None:
+        if not FACE_VS_PATH.exists():
+            return {"removed_face_ids": [], "removed_face_count": 0, "remaining_face_count": 0, "remaining_person_count": 0}
+        face_vs, face_meta_data = load_face_vector_store()
+
+    load_person_vector_store()
+
+    removed_face_ids: list[int] = []
+    kept_face_ids: list[int] = []
+    next_face_meta_data = {
+        str(key): value
+        for key, value in face_meta_data.items()
+        if str(key).startswith("_")
+    }
+
+    for key, value in face_meta_data.items():
+        if str(key).startswith("_") or not isinstance(value, dict):
+            continue
+        image_path = value.get("image_path")
+        if image_path and match_image_path(str(image_path)):
+            removed_face_ids.append(int(key))
+            continue
+        kept_face_ids.append(int(key))
+        next_face_meta_data[str(key)] = value
+
+    if not removed_face_ids:
+        _, current_person_meta_data = load_person_vector_store()
+        remaining_person_count = sum(1 for key in current_person_meta_data if not str(key).startswith("_"))
+        return {
+            "removed_face_ids": [],
+            "removed_face_count": 0,
+            "remaining_face_count": len(kept_face_ids),
+            "remaining_person_count": remaining_person_count,
+        }
+
+    rebuilt_face_index = _empty_index()
+    for face_id in kept_face_ids:
+        rebuilt_face_index.add_with_ids(
+            embedding_row(torch.tensor(face_vs.reconstruct(int(face_id)), dtype=torch.float32)),
+            np.array([int(face_id)], dtype=np.int64),
+        )
+
+    face_vs = rebuilt_face_index
+    face_meta_data = next_face_meta_data
+
+    if kept_face_ids:
+        finalize_face_clusters()
+    else:
+        _reset_person_store_in_memory()
+
+    save_face_vector_stores()
+
+    _, current_person_meta_data = load_person_vector_store()
+    remaining_person_count = sum(1 for key in current_person_meta_data if not str(key).startswith("_"))
+    return {
+        "removed_face_ids": removed_face_ids,
+        "removed_face_count": len(removed_face_ids),
+        "remaining_face_count": len(kept_face_ids),
+        "remaining_person_count": remaining_person_count,
+    }

@@ -148,3 +148,19 @@ def clear_collection(collection_id: int) -> None:
             updated = True
     if updated:
         save_library_state(state)
+
+
+def remove_image_states(image_ids: list[int]) -> int:
+    if not image_ids:
+        return 0
+
+    state = load_library_state()
+    image_states = state.setdefault("images", {})
+    removed_count = 0
+    for image_id in {int(image_id) for image_id in image_ids}:
+        if image_states.pop(str(image_id), None) is not None:
+            removed_count += 1
+
+    if removed_count > 0:
+        save_library_state(state)
+    return removed_count

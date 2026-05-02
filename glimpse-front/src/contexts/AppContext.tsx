@@ -50,6 +50,7 @@ interface AppState {
   isHydrating: boolean;
   isWorking: boolean;
   busyMessage: string | null;
+  showWorkingOverlay: boolean;
 }
 
 interface AppContextType extends AppState {
@@ -58,7 +59,7 @@ interface AppContextType extends AppState {
   downloadModel: (id: string) => Promise<void>;
   setActiveModel: (id: string) => Promise<void>;
   switchModelAndRebuild: (id: string) => Promise<void>;
-  removeModel: (id: string) => void;
+  removeModel: (id: string) => Promise<void>;
   addFolder: (path?: string, includeSubfolders?: boolean) => Promise<void>;
   addPhotos: () => Promise<void>;
   removeFolder: (id: string) => Promise<void>;
@@ -166,6 +167,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     isHydrating: true,
     isWorking: false,
     busyMessage: null,
+    showWorkingOverlay: true,
   });
 
   const setBackgroundIndexingHidden = useCallback((hidden: boolean) => {
@@ -176,9 +178,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const withBusy = useCallback(async <T,>(
     message: string,
     action: () => Promise<T>,
-    options?: { successMessage?: string; errorMessage?: string },
+    options?: { successMessage?: string; errorMessage?: string; showOverlay?: boolean },
   ) => {
-    setState((prev) => ({ ...prev, isWorking: true, busyMessage: message }));
+    setState((prev) => ({
+      ...prev,
+      isWorking: true,
+      busyMessage: message,
+      showWorkingOverlay: options?.showOverlay ?? true,
+    }));
     try {
       const result = await action();
       if (options?.successMessage) {
@@ -189,7 +196,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toast.error(options?.errorMessage ?? getErrorMessage(error));
       throw error;
     } finally {
-      setState((prev) => ({ ...prev, isWorking: false, busyMessage: null }));
+      setState((prev) => ({ ...prev, isWorking: false, busyMessage: null, showWorkingOverlay: true }));
     }
   }, []);
 
@@ -344,7 +351,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setDownloadProgress(100);
           await refreshData();
         },
-        { successMessage: "Model downloaded." },
+        { successMessage: "Model downloaded.", showOverlay: false },
       );
     } finally {
       window.clearInterval(interval);
@@ -445,9 +452,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, [refreshData, setBackgroundIndexingHidden, state.folders, withBusy]);
 
-  const removeModel = useCallback((_id: string) => {
-    toast.info("Model removal is not wired yet.");
-  }, []);
+  const removeModel = useCallback(async (id: string) => {
+    await withBusy(
+      "Deleting model...",
+      async () => {
+        await api.deleteModel(id);
+        await refreshData();
+      },
+      { successMessage: "Model deleted." },
+    );
+  }, [refreshData, withBusy]);
 
   const addFolder = useCallback(async (path?: string, includeSubfolders = true) => {
     await withBusy(

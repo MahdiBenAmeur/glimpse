@@ -1,11 +1,11 @@
-import { Search, Download, Check, Loader2 } from "lucide-react";
+import { Search, Download, Check, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { useApp } from "@/contexts/AppContext";
 
 export default function ModelSetupPage() {
-  const { models, activeModel, downloadModel, setActiveModel, setOnboardingStep } = useApp();
+  const { models, activeModel, downloadModel, setActiveModel, removeModel, setOnboardingStep, isWorking } = useApp();
   const hasActive = models.some(m => m.status === "active");
 
   return (
@@ -50,7 +50,7 @@ export default function ModelSetupPage() {
                 </div>
                 <div className="flex flex-col items-end gap-1.5 shrink-0">
                   {model.status === "not_installed" && (
-                    <Button size="sm" variant="outline" className="text-xs h-8" onClick={() => void downloadModel(model.id)}>
+                    <Button size="sm" variant="outline" className="text-xs h-8" onClick={() => void downloadModel(model.id)} disabled={isWorking}>
                       <Download className="w-3 h-3 mr-1.5" /> Download
                     </Button>
                   )}
@@ -60,8 +60,19 @@ export default function ModelSetupPage() {
                     </Button>
                   )}
                   {model.status === "installed" && (
-                    <Button size="sm" className="text-xs h-8" onClick={() => void setActiveModel(model.id)}>
+                    <Button size="sm" className="text-xs h-8" onClick={() => void setActiveModel(model.id)} disabled={isWorking}>
                       <Check className="w-3 h-3 mr-1.5" /> Use this model
+                    </Button>
+                  )}
+                  {(model.status === "installed" || model.status === "active") && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs h-8 text-destructive hover:text-destructive"
+                      onClick={() => void removeModel(model.id)}
+                      disabled={isWorking}
+                    >
+                      <Trash2 className="w-3 h-3 mr-1.5" /> Delete
                     </Button>
                   )}
                   {model.status === "active" && (

@@ -7,9 +7,20 @@ const fs = require('fs')
 let mainWindow
 let backendProcess
 let viteProcess
+let startupPromise = null
+let backendStarted = false
+let frontendStarted = false
+let isCreatingWindow = false
 
 const FRONTEND_URL = 'http://localhost:8080'
 const BACKEND_URL = 'http://127.0.0.1:8000'
+const APP_ROOT = path.join(__dirname, '..')
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+if (!hasSingleInstanceLock) {
+    logElectronError('APP', 'Another Electron instance is already running; exiting this one')
+    app.quit()
+}
 
 function logElectron(scope, message, extra) {
     const timestamp = new Date().toISOString()
@@ -41,15 +52,21 @@ function resolvePythonCommand() {
 
 // Start FastAPI
 function startBackend() {
+    if (backendStarted) {
+        logElectron('BACKEND', 'Backend start skipped because it is already starting or started')
+        return
+    }
+    backendStarted = true
+
     const pythonCommand = resolvePythonCommand()
     const serverScript = path.join(__dirname, '../server.py')
-    const backendCwd = path.join(__dirname, '..')
+    const backendCwd = APP_ROOT
     logElectron('BACKEND', 'Starting backend process', { pythonCommand, serverScript, backendCwd })
 
     backendProcess = spawn(pythonCommand, [
         serverScript
     ], {
-        cwd: path.join(__dirname, '..'),
+        cwd: APP_ROOT,
         shell: false
     })
     logElectron('BACKEND', `Backend process spawned with pid=${backendProcess.pid ?? 'unknown'}`)
@@ -61,44 +78,88 @@ function startBackend() {
     backendProcess.on('close', (code, signal) => logElectronError('BACKEND', `Backend process closed`, { code, signal }))
 }
 
-function waitForBackend(callback) {
-    const maxAttempts = 200
-    let attempts = 0
+function waitForService(url, scope, maxAttempts) {
+    return new Promise((resolve, reject) => {
+        let attempts = 0
+        let settled = false
+        let inFlight = false
 
-    const interval = setInterval(() => {
-        attempts++
-        if (attempts === 1 || attempts % 5 === 0) {
-            logElectron('BACKEND', `Waiting for backend health check attempt ${attempts}/${maxAttempts}`)
+        const finish = (callback) => {
+            if (settled) return
+            settled = true
+            callback()
         }
 
-        http.get(BACKEND_URL, () => {
-            clearInterval(interval)
-            logElectron('BACKEND', `Backend ready after ${attempts} attempts`)
-            callback()
-        }).on('error', error => {
-            if (attempts >= maxAttempts) {
-                clearInterval(interval)
-                logElectronError('BACKEND', 'Backend did not start in time', error)
-            } else if (attempts === 1 || attempts % 5 === 0) {
-                logElectronError('BACKEND', `Backend health check failed on attempt ${attempts}`, error.message)
+        const timer = setInterval(() => {
+            if (settled || inFlight) {
+                return
             }
-        })
-    }, 500)
+
+            attempts++
+            inFlight = true
+
+            if (attempts === 1 || attempts % 5 === 0) {
+                logElectron(scope, `Waiting for service health check attempt ${attempts}/${maxAttempts}`, { url })
+            }
+
+            const request = http.get(url, (response) => {
+                response.resume()
+                inFlight = false
+
+                if (response.statusCode && response.statusCode >= 200 && response.statusCode < 500) {
+                    clearInterval(timer)
+                    finish(() => {
+                        logElectron(scope, `Service ready after ${attempts} attempts`, { url, statusCode: response.statusCode })
+                        resolve()
+                    })
+                    return
+                }
+
+                if (attempts >= maxAttempts) {
+                    clearInterval(timer)
+                    finish(() => {
+                        const error = new Error(`Service returned status ${response.statusCode ?? 'unknown'} at ${url}`)
+                        logElectronError(scope, 'Service did not start in time', error.message)
+                        reject(error)
+                    })
+                }
+            })
+
+            request.on('error', (error) => {
+                inFlight = false
+                if (attempts >= maxAttempts) {
+                    clearInterval(timer)
+                    finish(() => {
+                        logElectronError(scope, 'Service did not start in time', error)
+                        reject(error)
+                    })
+                } else if (attempts === 1 || attempts % 5 === 0) {
+                    logElectronError(scope, `Service health check failed on attempt ${attempts}`, error.message)
+                }
+            })
+        }, 500)
+    })
 }
 
 // Start Vite
 function startVite() {
-    const frontendCwd = path.join(__dirname, '../glimpse-front')
+    if (frontendStarted) {
+        logElectron('FRONTEND', 'Frontend start skipped because it is already starting or started')
+        return
+    }
+    frontendStarted = true
+
+    const frontendCwd = path.join(APP_ROOT, 'glimpse-front')
     logElectron('FRONTEND', 'Starting frontend dev server', { frontendCwd, platform: process.platform })
 
     if (process.platform === 'win32') {
         viteProcess = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'npm run dev'], {
-            cwd: path.join(__dirname, '../glimpse-front'),
+            cwd: frontendCwd,
             shell: false
         })
     } else {
         viteProcess = spawn('npm', ['run', 'dev'], {
-            cwd: path.join(__dirname, '../glimpse-front'),
+            cwd: frontendCwd,
             shell: false
         })
     }
@@ -111,58 +172,59 @@ function startVite() {
     viteProcess.on('close', (code, signal) => logElectronError('FRONTEND', `Frontend process closed`, { code, signal }))
 }
 
-function waitForFrontend(callback) {
-    const maxAttempts = 50
-    let attempts = 0
-
-    const interval = setInterval(() => {
-        attempts++
-        if (attempts === 1 || attempts % 5 === 0) {
-            logElectron('FRONTEND', `Waiting for frontend health check attempt ${attempts}/${maxAttempts}`)
-        }
-
-        http.get(FRONTEND_URL, () => {
-            clearInterval(interval)
-            logElectron('FRONTEND', `Frontend ready after ${attempts} attempts`)
-            callback()
-        }).on('error', error => {
-            if (attempts >= maxAttempts) {
-                clearInterval(interval)
-                logElectronError('FRONTEND', 'Vite did not start in time', error)
-            } else if (attempts === 1 || attempts % 5 === 0) {
-                logElectronError('FRONTEND', `Frontend health check failed on attempt ${attempts}`, error.message)
-            }
-        })
-    }, 500)
-}
-
 // Create window
 function createWindow() {
-    logElectron('WINDOW', 'Creating browser window')
-    mainWindow = new BrowserWindow({
-        width: 1200,
-        height: 800,
-        autoHideMenuBar: true,
-        closable: true,
-        titleBarStyle: 'hidden',
-        titleBarOverlay: {
-            color: 'rgba(0, 0, 0, 0)',
-            symbolColor: '#000000ff',
-            height: 30
-        },
-        icon: path.join(__dirname, '../glimpse-front/public/logo.png')
-    })
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        logElectron('WINDOW', 'Create window skipped because a window already exists')
+        if (mainWindow.isMinimized()) {
+            mainWindow.restore()
+        }
+        mainWindow.focus()
+        return mainWindow
+    }
 
-    mainWindow.loadURL(FRONTEND_URL)
-    mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
-        logElectronError('WINDOW', 'Window failed to load URL', { errorCode, errorDescription, validatedURL })
-    })
-    mainWindow.webContents.on('did-finish-load', () => {
-        logElectron('WINDOW', 'Window finished loading')
-    })
-    mainWindow.on('closed', () => {
-        logElectron('WINDOW', 'Main window closed')
-    })
+    if (isCreatingWindow) {
+        logElectron('WINDOW', 'Create window skipped because window creation is already in progress')
+        return mainWindow
+    }
+
+    isCreatingWindow = true
+    try {
+        logElectron('WINDOW', 'Creating browser window')
+        mainWindow = new BrowserWindow({
+            width: 1200,
+            height: 800,
+            autoHideMenuBar: true,
+            closable: true,
+            titleBarStyle: 'hidden',
+            titleBarOverlay: {
+                color: 'rgba(0, 0, 0, 0)',
+                symbolColor: '#000000ff',
+                height: 30
+            },
+            icon: path.join(__dirname, '../glimpse-front/public/logo.png')
+        })
+
+        mainWindow.loadURL(FRONTEND_URL)
+        mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+            logElectronError('WINDOW', 'Window failed to load URL', { errorCode, errorDescription, validatedURL })
+        })
+        mainWindow.webContents.on('did-finish-load', () => {
+            logElectron('WINDOW', 'Window finished loading')
+        })
+        mainWindow.on('closed', () => {
+            logElectron('WINDOW', 'Main window closed')
+            mainWindow = null
+            isCreatingWindow = false
+        })
+        mainWindow.once('ready-to-show', () => {
+            isCreatingWindow = false
+        })
+        return mainWindow
+    } catch (error) {
+        isCreatingWindow = false
+        throw error
+    }
 }
 
 const { exec } = require('child_process')
@@ -181,20 +243,48 @@ function killProcessTree(pid) {
 }
 
 // App ready
-app.whenReady().then(() => {
-    logElectron('APP', 'Electron app is ready')
-    startBackend()
+app.on('second-instance', () => {
+    logElectron('APP', 'Second instance requested; focusing existing window')
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isMinimized()) {
+            mainWindow.restore()
+        }
+        mainWindow.focus()
+    }
+})
 
-    // Wait for backend FIRST
-    waitForBackend(() => {
-        // Then start frontend
+async function bootstrapApp() {
+    if (startupPromise) {
+        logElectron('APP', 'Bootstrap already running; reusing existing startup promise')
+        return startupPromise
+    }
+
+    startupPromise = (async () => {
+        logElectron('APP', 'Electron app is ready')
+        startBackend()
+        await waitForService(BACKEND_URL, 'BACKEND', 200)
         startVite()
+        await waitForService(FRONTEND_URL, 'FRONTEND', 50)
+        createWindow()
+    })()
 
-        // Then wait for frontend
-        waitForFrontend(() => {
-            createWindow()
-        })
-    })
+    try {
+        await startupPromise
+    } catch (error) {
+        startupPromise = null
+        logElectronError('APP', 'Bootstrap failed', error)
+        throw error
+    }
+}
+
+app.whenReady().then(() => {
+    return bootstrapApp()
+})
+
+app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow()
+    }
 })
 
 // Ensure app quits when window is closed
