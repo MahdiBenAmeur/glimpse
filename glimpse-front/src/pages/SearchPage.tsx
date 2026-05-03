@@ -30,6 +30,11 @@ type SearchRouteState = {
   similarSourceLabel?: string;
 } | null;
 
+type ActiveFilterChip = {
+  key: string;
+  label: string;
+};
+
 function getPathLabel(path: string) {
   const normalized = path.replace(/\\/g, "/");
   const parts = normalized.split("/").filter(Boolean);
@@ -64,20 +69,47 @@ function normalizeSearchFilters(filters?: Record<string, unknown>): SearchFilter
   };
 }
 
-function buildFilterLabels(
+function buildFilterChips(
   filters: SearchFilterState,
   peopleLookup: Map<number, string>,
-) {
-  const labels: string[] = [];
-  filters.folders.forEach((folder) => labels.push(`Folder: ${getPathLabel(folder)}`));
-  if (filters.dateRange !== "any") labels.push(`Date: ${filters.dateRange}`);
-  if (filters.facePresence !== "any") labels.push(filters.facePresence === "faces" ? "Contains faces" : "No faces");
+): ActiveFilterChip[] {
+  const chips: ActiveFilterChip[] = [];
+
+  filters.folders.forEach((folder) => {
+    chips.push({
+      key: `folder:${folder}`,
+      label: `Folder: ${getPathLabel(folder)}`,
+    });
+  });
+
+  if (filters.dateRange !== "any") {
+    chips.push({ key: "dateRange", label: `Date: ${filters.dateRange}` });
+  }
+
+  if (filters.facePresence !== "any") {
+    chips.push({
+      key: "facePresence",
+      label: filters.facePresence === "faces" ? "Contains faces" : "No faces",
+    });
+  }
+
   filters.people.forEach((person) => {
     const name = peopleLookup.get(person.id) ?? `Person ${person.id}`;
     const prefix = person.preference === "exclude" ? "Exclude" : person.preference === "prefer" ? "Prefer" : "Must include";
-    labels.push(`${prefix}: ${name}`);
+    chips.push({
+      key: `person:${person.id}:${person.preference}`,
+      label: `${prefix}: ${name}`,
+    });
   });
-  return labels;
+
+  if (filters.facePhotoPath) {
+    chips.push({
+      key: "facePhotoPath",
+      label: "Face photo search",
+    });
+  }
+
+  return chips;
 }
 
 export default function SearchPage() {
@@ -89,7 +121,6 @@ export default function SearchPage() {
   const [hasSearched, setHasSearched] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [searchFilterRequest, setSearchFilterRequest] = useState<SearchFilterState>({
     folders: [],
     dateRange: "any",
@@ -105,13 +136,17 @@ export default function SearchPage() {
     () => new Map(people.filter((person) => person.name).map((person) => [Number(person.id), person.name as string])),
     [people],
   );
+  const activeFilterChips = useMemo(
+    () => buildFilterChips(searchFilterRequest, peopleLookup),
+    [peopleLookup, searchFilterRequest],
+  );
 
   const indexFresh = lastIndexedTime
     ? (Date.now() - new Date(lastIndexedTime).getTime()) < 86400000
     : false;
 
   const handleSearch = async () => {
-    if (!query.trim()) return;
+    if (!query.trim() && !searchFilterRequest.facePhotoPath) return;
     setHasSearched(true);
     setIsSearching(true);
     try {
@@ -125,7 +160,6 @@ export default function SearchPage() {
     setHasSearched(true);
     setIsSearching(true);
     setQuery(`Similar to ${file.name}`);
-    setActiveFilters([]);
     setSearchFilterRequest({
       folders: [],
       dateRange: "any",
@@ -140,9 +174,42 @@ export default function SearchPage() {
     }
   };
 
-  const removeFilter = (f: string) => setActiveFilters(prev => prev.filter(x => x !== f));
+  const removeFilter = (filterKey: string) => {
+    setSearchFilterRequest((prev) => {
+      if (filterKey.startsWith("folder:")) {
+        const path = filterKey.slice("folder:".length);
+        return {
+          ...prev,
+          folders: prev.folders.filter((folder) => folder !== path),
+        };
+      }
+
+      if (filterKey === "dateRange") {
+        return { ...prev, dateRange: "any" };
+      }
+
+      if (filterKey === "facePresence") {
+        return { ...prev, facePresence: "any" };
+      }
+
+      if (filterKey === "facePhotoPath") {
+        return { ...prev, facePhotoPath: null };
+      }
+
+      if (filterKey.startsWith("person:")) {
+        const [, personId, preference] = filterKey.split(":");
+        const id = Number(personId);
+        return {
+          ...prev,
+          people: prev.people.filter((person) => !(person.id === id && person.preference === preference)),
+        };
+      }
+
+      return prev;
+    });
+  };
+
   const clearFilters = () => {
-    setActiveFilters([]);
     setSearchFilterRequest({
       folders: [],
       dateRange: "any",
@@ -153,7 +220,7 @@ export default function SearchPage() {
   };
 
   const handleSaveCurrentSearch = async () => {
-    if (!saveName.trim() || !query.trim()) return;
+    if (!saveName.trim() || (!query.trim() && !searchFilterRequest.facePhotoPath)) return;
     await saveSearch(saveName.trim(), query.trim(), searchFilterRequest as Record<string, unknown>);
     setSaveDialogOpen(false);
     setSaveName("");
@@ -169,7 +236,6 @@ export default function SearchPage() {
         const nextFilters = normalizeSearchFilters(state.savedSearch.filters);
         setQuery(state.savedSearch.query || "");
         setSearchFilterRequest(nextFilters);
-        setActiveFilters(buildFilterLabels(nextFilters, peopleLookup));
         setHasSearched(true);
         setIsSearching(true);
         try {
@@ -185,7 +251,6 @@ export default function SearchPage() {
 
       if (state.similarImageId !== undefined) {
         setQuery(`Similar to ${state.similarSourceLabel ?? "image"}`);
-        setActiveFilters([]);
         setHasSearched(true);
         setIsSearching(true);
         try {
@@ -235,7 +300,7 @@ export default function SearchPage() {
             size="sm"
             className="h-8 text-xs gap-1.5"
             onClick={() => setSaveDialogOpen(true)}
-            disabled={!query.trim()}
+            disabled={!query.trim() && !searchFilterRequest.facePhotoPath}
           >
             <BookmarkPlus className="w-3 h-3" /> Save search
           </Button>
@@ -336,13 +401,13 @@ export default function SearchPage() {
       </div>
 
       {/* Active filters */}
-      {activeFilters.length > 0 && (
+      {activeFilterChips.length > 0 && (
         <div className="px-6 pb-3 flex items-center gap-2 flex-wrap shrink-0">
-          {activeFilters.map((f) => (
-            <Badge key={f} variant="secondary" className="text-xs gap-1 pr-1">
-              {f}
+          {activeFilterChips.map((filterChip) => (
+            <Badge key={filterChip.key} variant="secondary" className="text-xs gap-1 pr-1">
+              {filterChip.label}
               <button
-                onClick={() => removeFilter(f)}
+                onClick={() => removeFilter(filterChip.key)}
                 className="ml-0.5 hover:bg-muted rounded-full p-0.5"
               >
                 <X className="w-2.5 h-2.5" />
@@ -378,8 +443,8 @@ export default function SearchPage() {
       <AdvancedFiltersDrawer
         open={filtersOpen}
         onOpenChange={setFiltersOpen}
+        currentFilters={searchFilterRequest}
         onApply={(filters) => {
-          setActiveFilters(filters.labels);
           setSearchFilterRequest({
             folders: filters.folders,
             dateRange: filters.dateRange,
@@ -424,7 +489,7 @@ export default function SearchPage() {
             <Button
               size="sm"
               onClick={() => void handleSaveCurrentSearch()}
-              disabled={!saveName.trim() || !query.trim()}
+              disabled={!saveName.trim() || (!query.trim() && !searchFilterRequest.facePhotoPath)}
             >
               Save
             </Button>

@@ -4,6 +4,8 @@ from typing import Sequence
 
 from PIL import Image
 
+from backend.services.app_settings_service import load_app_settings
+
 
 IMAGE_SUFFIXES = {suffix.lower() for suffix in Image.registered_extensions()}
 
@@ -62,9 +64,15 @@ def prepare_images(image_paths: Sequence[str | Path]) -> tuple[list[Path], list[
 
 def list_image_files(folder_path: str | Path, *, recursive: bool = True) -> list[Path]:
     folder = Path(folder_path)
+    skip_hidden_folders = bool(load_app_settings().get("skip_hidden_folders", True))
     iterator = folder.rglob("*") if recursive else folder.iterdir()
     return sorted(
         path
         for path in iterator
-        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
+        if path.is_file()
+        and path.suffix.lower() in IMAGE_SUFFIXES
+        and not (
+            skip_hidden_folders
+            and any(part.startswith(".") for part in path.relative_to(folder).parts)
+        )
     )

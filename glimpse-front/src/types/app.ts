@@ -10,6 +10,17 @@ export interface ModelInfo {
   downloadProgress?: number;
 }
 
+export interface AppSettings {
+  rememberLastPage: boolean;
+  confirmDestructiveActions: boolean;
+  doubleClickBehavior: "viewer" | "external";
+  includeSubfoldersByDefault: boolean;
+  skipHiddenFolders: boolean;
+  faceDetectionEnabled: boolean;
+  compactSidebar: boolean;
+  thumbnailDensity: "comfortable" | "compact";
+}
+
 export interface FolderInfo {
   id: string;
   path: string;

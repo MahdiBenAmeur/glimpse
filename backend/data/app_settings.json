@@ -1,0 +1,10 @@
+{
+  "remember_last_page": true,
+  "confirm_destructive_actions": true,
+  "double_click_behavior": "viewer",
+  "include_subfolders_by_default": true,
+  "skip_hidden_folders": true,
+  "face_detection_enabled": true,
+  "compact_sidebar": false,
+  "thumbnail_density": "compact"
+}

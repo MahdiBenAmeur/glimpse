@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -12,6 +12,13 @@ import { uploadFaceSearchPhoto } from "@/lib/api";
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  currentFilters: {
+    folders: string[];
+    dateRange: "any" | "today" | "last-7-days" | "last-30-days" | "this-year";
+    facePresence: "any" | "faces" | "no-faces";
+    people: Array<{ id: number; preference: "must_include" | "prefer" | "exclude" }>;
+    facePhotoPath: string | null;
+  };
   onApply: (filters: {
     labels: string[];
     folders: string[];
@@ -22,7 +29,7 @@ interface Props {
   }) => void;
 }
 
-export function AdvancedFiltersDrawer({ open, onOpenChange, onApply }: Props) {
+export function AdvancedFiltersDrawer({ open, onOpenChange, currentFilters, onApply }: Props) {
   const { folders, people } = useApp();
   const facePhotoInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedFolders, setSelectedFolders] = useState<string[]>([]);
@@ -32,6 +39,25 @@ export function AdvancedFiltersDrawer({ open, onOpenChange, onApply }: Props) {
   const [facePhotoPath, setFacePhotoPath] = useState<string | null>(null);
   const [facePhotoName, setFacePhotoName] = useState<string | null>(null);
   const [isUploadingFacePhoto, setIsUploadingFacePhoto] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+
+    setSelectedFolders(currentFilters.folders);
+    setDateRange(currentFilters.dateRange);
+    setFacePresence(currentFilters.facePresence);
+    setSelectedPeople(
+      currentFilters.people.map((person) => ({
+        id: String(person.id),
+        name: people.find((candidate) => Number(candidate.id) === person.id)?.name ?? `Person ${person.id}`,
+        mode: person.preference === "exclude" ? "Exclude" : person.preference === "prefer" ? "Prefer" : "Must include",
+      })),
+    );
+    setFacePhotoPath(currentFilters.facePhotoPath);
+    if (!currentFilters.facePhotoPath) {
+      setFacePhotoName(null);
+    }
+  }, [currentFilters, open, people]);
 
   const handleApply = () => {
     const labels: string[] = [];

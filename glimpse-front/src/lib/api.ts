@@ -1,4 +1,5 @@
 import type {
+  AppSettings,
   CollectionInfo,
   FolderInfo,
   ImageResult,
@@ -42,6 +43,17 @@ export interface IndexSummary {
   totalFolders: number;
   indexedPaths: string[];
 }
+
+export const DEFAULT_APP_SETTINGS: AppSettings = {
+  rememberLastPage: true,
+  confirmDestructiveActions: true,
+  doubleClickBehavior: "viewer",
+  includeSubfoldersByDefault: true,
+  skipHiddenFolders: true,
+  faceDetectionEnabled: true,
+  compactSidebar: false,
+  thumbnailDensity: "comfortable",
+};
 
 export interface ImportedImagesResult {
   folder: FolderInfo;
@@ -266,6 +278,30 @@ export async function deleteModel(modelId: string): Promise<void> {
   await apiRequest(`/api/index/models/${modelId}`, {
     method: "DELETE",
   });
+}
+
+function mapAppSettings(raw: any): AppSettings {
+  return {
+    rememberLastPage: Boolean(raw.rememberLastPage ?? DEFAULT_APP_SETTINGS.rememberLastPage),
+    confirmDestructiveActions: Boolean(raw.confirmDestructiveActions ?? DEFAULT_APP_SETTINGS.confirmDestructiveActions),
+    doubleClickBehavior: raw.doubleClickBehavior === "external" ? "external" : "viewer",
+    includeSubfoldersByDefault: Boolean(raw.includeSubfoldersByDefault ?? DEFAULT_APP_SETTINGS.includeSubfoldersByDefault),
+    skipHiddenFolders: Boolean(raw.skipHiddenFolders ?? DEFAULT_APP_SETTINGS.skipHiddenFolders),
+    faceDetectionEnabled: Boolean(raw.faceDetectionEnabled ?? DEFAULT_APP_SETTINGS.faceDetectionEnabled),
+    compactSidebar: Boolean(raw.compactSidebar ?? DEFAULT_APP_SETTINGS.compactSidebar),
+    thumbnailDensity: raw.thumbnailDensity === "compact" ? "compact" : "comfortable",
+  };
+}
+
+export async function getAppSettings(): Promise<AppSettings> {
+  return mapAppSettings(await apiRequest<any>("/api/settings/"));
+}
+
+export async function updateAppSettings(changes: Partial<AppSettings>): Promise<AppSettings> {
+  return mapAppSettings(await apiRequest<any>("/api/settings/", {
+    method: "PATCH",
+    body: JSON.stringify(changes),
+  }));
 }
 
 export async function getFolders(): Promise<FolderInfo[]> {

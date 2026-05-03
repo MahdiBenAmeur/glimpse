@@ -184,8 +184,8 @@ def _build_search_result_item(
 
 @router.post("/", response_model=SearchResponse)
 def run_search(payload: SearchRequest, request: Request) -> dict[str, Any]:
-    if not payload.query.strip():
-        raise HTTPException(status_code=400, detail="query must not be empty")
+    if not payload.query.strip() and not payload.facePhotoPath:
+        raise HTTPException(status_code=400, detail="query must not be empty unless a face photo is provided")
 
     try:
         image_model = get_embedding_model(payload.modelId)

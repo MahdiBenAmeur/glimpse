@@ -297,8 +297,9 @@ def global_search(
     person_filters: dict | Sequence[dict] | None = None,
     face_photo_path: str | Path | None = None,
 ) -> dict:
-    if not query.strip():
-        raise ValueError("query must not be empty")
+    normalized_query = query.strip()
+    if not normalized_query and face_photo_path is None:
+        raise ValueError("query must not be empty unless a face photo search is provided")
 
     page_size = _validate_top_k(k)
     page_number = _validate_page_number(page_number)
@@ -309,12 +310,21 @@ def global_search(
     if date_cutoff is not None and cutoff_datetime is None:
         raise ValueError("date_cutoff must be a valid ISO-like datetime or date string")
 
-    text_embedding = image_model.embed_text(query)
-    emb_dim = int(text_embedding.shape[-1])
-    image_vs, image_meta_data = load_image_vector_store(emb_dim, image_model)
+    text_scores: np.ndarray | None = None
+    image_ids: np.ndarray | None = None
+    image_vs = None
+    image_meta_data: dict = {}
+
+    if normalized_query:
+        text_embedding = image_model.embed_text(normalized_query)
+        emb_dim = int(text_embedding.shape[-1])
+        image_vs, image_meta_data = load_image_vector_store(emb_dim, image_model)
+    else:
+        image_vs, image_meta_data = load_image_vector_store(image_model=image_model)
+
     if image_vs.ntotal == 0:
         return {
-            "query": query,
+            "query": normalized_query,
             "page_number": page_number,
             "page_size": page_size,
             "total_results": 0,
@@ -323,7 +333,18 @@ def global_search(
         }
 
     all_image_count = int(image_vs.ntotal)
-    text_scores, image_ids = image_vs.search(embedding_row(text_embedding), k=all_image_count)
+    if normalized_query:
+        text_scores, image_ids = image_vs.search(embedding_row(text_embedding), k=all_image_count)
+        candidate_rows = zip(text_scores[0], image_ids[0])
+    else:
+        candidate_rows = (
+            (0.0, image_id)
+            for image_id in sorted(
+                int(key)
+                for key in image_meta_data.keys()
+                if not str(key).startswith("_")
+            )
+        )
 
     _, face_meta_data = load_face_vector_store()
     images_with_faces, image_path_2_person_ids = _build_image_face_context(face_meta_data)
@@ -340,7 +361,7 @@ def global_search(
 
     ranked_results = []
 
-    for raw_text_score, image_id in zip(text_scores[0], image_ids[0]):
+    for raw_text_score, image_id in candidate_rows:
         image_id = int(image_id)
         if image_id < 0:
             continue
@@ -369,7 +390,7 @@ def global_search(
         if exclude_ids and image_person_ids.intersection(exclude_ids):
             continue
 
-        text_score = _normalize_similarity(raw_text_score)
+        text_score = _normalize_similarity(raw_text_score) if normalized_query else None
         face_score = face_photo_scores.get(image_path, 0.0) if face_photo_path is not None else None
         preferred_people_score = (
             len(image_person_ids.intersection(prefer_ids)) / len(prefer_ids)
@@ -377,11 +398,18 @@ def global_search(
             else None
         )
 
-        score_components = [text_score]
+        score_components = []
+        if text_score is not None:
+            score_components.append(text_score)
         if face_score is not None:
             score_components.append(face_score)
         if preferred_people_score is not None:
             score_components.append(preferred_people_score)
+
+        if face_photo_path is not None and face_score is not None and face_score <= 0:
+            continue
+        if not score_components:
+            continue
 
         final_score = sum(score_components) / len(score_components)
         ranked_results.append(
@@ -401,7 +429,7 @@ def global_search(
     ranked_results.sort(
         key=lambda result: (
             result["final_score"],
-            result["text_score"],
+            result["text_score"] if result["text_score"] is not None else -1.0,
             result["face_score"] if result["face_score"] is not None else -1.0,
         ),
         reverse=True,
@@ -413,7 +441,7 @@ def global_search(
     end_index = start_index + page_size
 
     return {
-        "query": query,
+        "query": normalized_query,
         "page_number": page_number,
         "page_size": page_size,
         "face_presence": normalized_face_presence,

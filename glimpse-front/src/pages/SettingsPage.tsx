@@ -4,7 +4,6 @@ import { Download, Check, Loader2, AlertTriangle, HardDrive, FolderOpen, Trash2 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -52,20 +51,18 @@ export default function SettingsPage() {
 }
 
 function GeneralSettings() {
+  const { settings, updateSettings } = useApp();
   return (
     <div className="space-y-6">
       <h2 className="text-base font-medium text-foreground">General</h2>
-      <SettingRow label="Launch on startup" description="Open Glimpse One when you log in">
-        <Switch />
-      </SettingRow>
       <SettingRow label="Remember last page" description="Return to the last visited page on launch">
-        <Switch defaultChecked />
+        <Switch checked={settings.rememberLastPage} onCheckedChange={(checked) => void updateSettings({ rememberLastPage: checked })} />
       </SettingRow>
       <SettingRow label="Confirm destructive actions" description="Ask for confirmation before deleting">
-        <Switch defaultChecked />
+        <Switch checked={settings.confirmDestructiveActions} onCheckedChange={(checked) => void updateSettings({ confirmDestructiveActions: checked })} />
       </SettingRow>
       <SettingRow label="Double-click behavior" description="What happens when you double-click a result">
-        <Select defaultValue="viewer">
+        <Select value={settings.doubleClickBehavior} onValueChange={(value) => void updateSettings({ doubleClickBehavior: value as "viewer" | "external" })}>
           <SelectTrigger className="w-44 h-8 text-xs">
             <SelectValue />
           </SelectTrigger>
@@ -246,17 +243,18 @@ function StorageSettings() {
 }
 
 function IndexingSettings() {
+  const { settings, updateSettings } = useApp();
   return (
     <div className="space-y-6">
       <h2 className="text-base font-medium text-foreground">Indexing</h2>
       <SettingRow label="Include subfolders by default" description="Scan subdirectories when adding new folders">
-        <Switch defaultChecked />
+        <Switch checked={settings.includeSubfoldersByDefault} onCheckedChange={(checked) => void updateSettings({ includeSubfoldersByDefault: checked })} />
       </SettingRow>
       <SettingRow label="Skip hidden folders" description="Ignore folders starting with a dot">
-        <Switch defaultChecked />
+        <Switch checked={settings.skipHiddenFolders} onCheckedChange={(checked) => void updateSettings({ skipHiddenFolders: checked })} />
       </SettingRow>
       <SettingRow label="Face detection" description="Detect and index faces in your photos">
-        <Switch defaultChecked />
+        <Switch checked={settings.faceDetectionEnabled} onCheckedChange={(checked) => void updateSettings({ faceDetectionEnabled: checked })} />
       </SettingRow>
       <Separator />
       <div>
@@ -272,6 +270,7 @@ function IndexingSettings() {
 }
 
 function InterfaceSettings() {
+  const { settings, updateSettings } = useApp();
   const { theme, setTheme } = useTheme();
   return (
     <div className="space-y-6">
@@ -289,10 +288,10 @@ function InterfaceSettings() {
         </Select>
       </SettingRow>
       <SettingRow label="Compact sidebar" description="Use a narrower sidebar by default">
-        <Switch />
+        <Switch checked={settings.compactSidebar} onCheckedChange={(checked) => void updateSettings({ compactSidebar: checked })} />
       </SettingRow>
       <SettingRow label="Thumbnail density" description="Adjust how many images appear per row">
-        <Select defaultValue="comfortable">
+        <Select value={settings.thumbnailDensity} onValueChange={(value) => void updateSettings({ thumbnailDensity: value as "comfortable" | "compact" })}>
           <SelectTrigger className="w-32 h-8 text-xs">
             <SelectValue />
           </SelectTrigger>

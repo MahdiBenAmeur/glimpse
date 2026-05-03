@@ -1,6 +1,7 @@
 import { Loader2 } from "lucide-react";
+import { useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Navigate, useLocation } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -22,9 +23,26 @@ import SettingsPage from "@/pages/SettingsPage";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
+const LAST_ROUTE_KEY = "glimpse-last-route";
+
+function getSavedRoute() {
+  const saved = localStorage.getItem(LAST_ROUTE_KEY);
+  if (!saved || !saved.startsWith("/")) {
+    return "/search";
+  }
+  return saved === "/" ? "/search" : saved;
+}
 
 function AppRoutes() {
-  const { isFirstLaunch, onboardingStep, isHydrating, isWorking, busyMessage, showWorkingOverlay } = useApp();
+  const { isFirstLaunch, onboardingStep, isHydrating, isWorking, busyMessage, showWorkingOverlay, settings } = useApp();
+  const location = useLocation();
+
+  useEffect(() => {
+    if (isFirstLaunch || !settings.rememberLastPage) {
+      return;
+    }
+    localStorage.setItem(LAST_ROUTE_KEY, location.pathname);
+  }, [isFirstLaunch, location.pathname, settings.rememberLastPage]);
 
   if (isHydrating) {
     return <BootSplash />;
@@ -40,7 +58,7 @@ function AppRoutes() {
     <>
       <AppLayout>
         <Routes>
-          <Route path="/" element={<Navigate to="/search" replace />} />
+          <Route path="/" element={<Navigate to={settings.rememberLastPage ? getSavedRoute() : "/search"} replace />} />
           <Route path="/search" element={<SearchPage />} />
           <Route path="/people" element={<PeoplePage />} />
           <Route path="/people/:id" element={<PersonDetailPage />} />

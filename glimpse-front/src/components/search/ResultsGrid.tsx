@@ -3,13 +3,15 @@ import { useApp } from "@/contexts/AppContext";
 import type { ImageResult } from "@/types/app";
 import { useState } from "react";
 import { ImageViewer } from "@/components/ImageViewer";
+import { openImageExternally } from "@/lib/api";
+import { toast } from "@/components/ui/sonner";
 
 interface Props {
   images: ImageResult[];
 }
 
 export function ResultsGrid({ images }: Props) {
-  const { toggleFavorite } = useApp();
+  const { toggleFavorite, settings } = useApp();
   const [viewerImage, setViewerImage] = useState<ImageResult | null>(null);
   const [viewerIdx, setViewerIdx] = useState(0);
 
@@ -18,14 +20,39 @@ export function ResultsGrid({ images }: Props) {
     setViewerIdx(idx);
   };
 
+  const handleOpenExternal = async (img: ImageResult) => {
+    const targetImageId = img.imageId ?? Number(img.id);
+    if (!Number.isFinite(targetImageId)) {
+      toast.error("This image cannot be opened externally.");
+      return;
+    }
+    try {
+      await openImageExternally(targetImageId);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not open image externally.");
+    }
+  };
+
+  const handleResultDoubleClick = (img: ImageResult, idx: number) => {
+    if (settings.doubleClickBehavior === "external") {
+      void handleOpenExternal(img);
+      return;
+    }
+    openViewer(img, idx);
+  };
+
+  const gridClassName = settings.thumbnailDensity === "compact"
+    ? "grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3"
+    : "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3";
+
   return (
     <>
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+      <div className={gridClassName}>
         {images.map((img, i) => (
           <div
             key={`${img.id}-${img.path ?? i}`}
             className="group relative rounded-lg overflow-hidden bg-card border border-border cursor-pointer hover:border-primary/30 transition-colors"
-            onDoubleClick={() => openViewer(img, i)}
+            onDoubleClick={() => void handleResultDoubleClick(img, i)}
           >
             <div className="aspect-[4/3] overflow-hidden">
               <img

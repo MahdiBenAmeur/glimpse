@@ -3,11 +3,15 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { useApp } from "@/contexts/AppContext";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export default function FolderSelectionPage() {
-  const { folders, addFolder, addPhotos, removeFolder, setOnboardingStep, startIndexing } = useApp();
-  const [includeSubfolders, setIncludeSubfolders] = useState(true);
+  const { folders, addFolder, addPhotos, removeFolder, setOnboardingStep, startIndexing, settings } = useApp();
+  const [includeSubfolders, setIncludeSubfolders] = useState(settings.includeSubfoldersByDefault);
+
+  useEffect(() => {
+    setIncludeSubfolders(settings.includeSubfoldersByDefault);
+  }, [settings.includeSubfoldersByDefault]);
 
   const handleAddFolder = () => void addFolder(undefined, includeSubfolders);
   const handleAddPhotos = () => void addPhotos();

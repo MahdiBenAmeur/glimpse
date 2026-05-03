@@ -11,6 +11,7 @@ from backend.core.models.faces.embedding import load_face_embedding_model
 from backend.core.models.faces.store import finalize_face_clusters, save_face_vector_stores
 from backend.core.models.vision_language.base import BaseEmbeddingModel
 from backend.core.models.vision_language.store import save_image_vector_store
+from backend.services.app_settings_service import load_app_settings
 from backend.services.library_state_service import load_image_meta_data
 from backend.utils.image_processing import coerce_image_paths, list_image_files, prepare_images
 from backend.utils.path_utils import canonicalize_path_key
@@ -127,8 +128,10 @@ def index_batch(
 
     _log_indexing("Loading models required for batch", model_type=type(image_model).__name__)
     image_model.load_model()
-    load_face_detector()
-    load_face_embedding_model()
+    face_detection_enabled = bool(load_app_settings().get("face_detection_enabled", True))
+    if face_detection_enabled:
+        load_face_detector()
+        load_face_embedding_model()
     _log_indexing("All models loaded for batch", **_gpu_memory_snapshot())
 
     if cancel_check is not None and cancel_check():
@@ -155,20 +158,37 @@ def index_batch(
         stats["cancelled"] = True
         return stats
 
-    face_stats = index_face_batch(
-        valid_paths,
-        embedding_batch_size=batch_size,
-        validate_inputs=False,
-        path_2_created_at=path_2_created_at,
-        cancel_check=cancel_check,
-    )
-    _log_indexing(
-        "Face indexing finished for batch",
-        detected_face_count=face_stats.get("detected_face_count"),
-        indexed_face_count=face_stats.get("indexed_face_count"),
-        assigned_person_count=face_stats.get("assigned_person_count"),
-        **_gpu_memory_snapshot(),
-    )
+    if face_detection_enabled:
+        face_stats = index_face_batch(
+            valid_paths,
+            embedding_batch_size=batch_size,
+            validate_inputs=False,
+            path_2_created_at=path_2_created_at,
+            cancel_check=cancel_check,
+        )
+        _log_indexing(
+            "Face indexing finished for batch",
+            detected_face_count=face_stats.get("detected_face_count"),
+            indexed_face_count=face_stats.get("indexed_face_count"),
+            assigned_person_count=face_stats.get("assigned_person_count"),
+            **_gpu_memory_snapshot(),
+        )
+    else:
+        face_stats = {
+            "input_count": len(valid_paths),
+            "valid_count": len(valid_paths),
+            "failed_count": 0,
+            "failed_items": [],
+            "detected_face_count": 0,
+            "detected_image_count": 0,
+            "indexed_face_count": 0,
+            "new_person_count": 0,
+            "assigned_person_count": 0,
+            "assigned_person_ids": [],
+            "person_store_total": 0,
+            "face_store_total": 0,
+        }
+        _log_indexing("Face indexing skipped because face detection is disabled")
 
     stats["image_indexing"] = image_stats
     stats["face_indexing"] = face_stats

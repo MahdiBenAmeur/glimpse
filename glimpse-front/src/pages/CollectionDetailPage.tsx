@@ -75,7 +75,13 @@ export default function CollectionDetailPage() {
             variant="ghost"
             size="sm"
             className="text-xs h-8 gap-1 text-destructive hover:text-destructive"
-            onClick={() => { deleteCollection(collection.id); navigate("/collections"); }}
+            onClick={() => {
+              void deleteCollection(collection.id).then((deleted) => {
+                if (deleted) {
+                  navigate("/collections");
+                }
+              });
+            }}
           >
             <Trash2 className="w-3 h-3" /> Delete
           </Button>

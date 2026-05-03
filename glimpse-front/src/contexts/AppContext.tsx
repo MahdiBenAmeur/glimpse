@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "@/components/ui/sonner";
-import { type CollectionInfo, type FolderInfo, type ImageResult, type ModelInfo, type PersonInfo, type SavedSearch } from "@/types/app";
+import { type AppSettings, type CollectionInfo, type FolderInfo, type ImageResult, type ModelInfo, type PersonInfo, type SavedSearch } from "@/types/app";
 import type { PersonMergeResult } from "@/lib/api";
 import * as api from "@/lib/api";
 
@@ -51,6 +51,7 @@ interface AppState {
   isWorking: boolean;
   busyMessage: string | null;
   showWorkingOverlay: boolean;
+  settings: AppSettings;
 }
 
 interface AppContextType extends AppState {
@@ -70,13 +71,14 @@ interface AppContextType extends AppState {
   renamePerson: (personId: string, name: string) => Promise<void>;
   mergePerson: (targetPersonId: string, sourcePersonId: string) => Promise<PersonMergeResult>;
   createCollection: (name: string, description?: string) => Promise<void>;
-  deleteCollection: (id: string) => Promise<void>;
+  deleteCollection: (id: string) => Promise<boolean>;
   saveSearch: (name: string, query: string, filters: Record<string, unknown>) => Promise<void>;
   deleteSavedSearch: (id: string) => Promise<void>;
   searchImages: (query: string, filters?: SearchFilters) => Promise<ImageResult[]>;
   searchSimilarImages: (imageId: string | number) => Promise<ImageResult[]>;
   searchImagesByFile: (file: File) => Promise<ImageResult[]>;
   refreshData: (options?: { showLoader?: boolean }) => Promise<void>;
+  updateSettings: (changes: Partial<AppSettings>) => Promise<AppSettings>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -168,6 +170,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     isWorking: false,
     busyMessage: null,
     showWorkingOverlay: true,
+    settings: api.DEFAULT_APP_SETTINGS,
   });
 
   const setBackgroundIndexingHidden = useCallback((hidden: boolean) => {
@@ -206,7 +209,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setState((prev) => ({ ...prev, isHydrating: true }));
     }
 
-    const [modelsResult, summaryResult, foldersResult, peopleResult, collectionsResult, savedSearchesResult, favoritesResult] =
+    const [modelsResult, summaryResult, foldersResult, peopleResult, collectionsResult, savedSearchesResult, favoritesResult, settingsResult] =
       await Promise.allSettled([
         api.getModels(),
         api.getIndexSummary(),
@@ -215,6 +218,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         api.getCollections(),
         api.getSavedSearches(),
         api.getFavorites(),
+        api.getAppSettings(),
       ]);
 
     setState((prev) => {
@@ -230,6 +234,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const collections = collectionsResult.status === "fulfilled" ? collectionsResult.value : prev.collections;
       const savedSearches = savedSearchesResult.status === "fulfilled" ? savedSearchesResult.value : prev.savedSearches;
       const favorites = favoritesResult.status === "fulfilled" ? favoritesResult.value : prev.favorites;
+      const settings = settingsResult.status === "fulfilled" ? settingsResult.value : prev.settings;
       const indexingStatus = summaryResult.status === "fulfilled" ? summaryResult.value.indexingStatus : prev.indexingStatus;
       const lastIndexedTime = summaryResult.status === "fulfilled" ? summaryResult.value.lastIndexedTime : prev.lastIndexedTime;
       const totalIndexedImages = summaryResult.status === "fulfilled" ? summaryResult.value.totalIndexedImages : prev.totalIndexedImages;
@@ -255,6 +260,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         favorites,
         collections,
         savedSearches,
+        settings,
         indexingStatus,
         lastIndexedTime,
         totalIndexedImages,
@@ -453,6 +459,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [refreshData, setBackgroundIndexingHidden, state.folders, withBusy]);
 
   const removeModel = useCallback(async (id: string) => {
+    if (state.settings.confirmDestructiveActions && !window.confirm("Delete this downloaded model?")) {
+      return;
+    }
     await withBusy(
       "Deleting model...",
       async () => {
@@ -461,22 +470,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
       { successMessage: "Model deleted." },
     );
-  }, [refreshData, withBusy]);
+  }, [refreshData, state.settings.confirmDestructiveActions, withBusy]);
 
-  const addFolder = useCallback(async (path?: string, includeSubfolders = true) => {
+  const addFolder = useCallback(async (path?: string, includeSubfolders?: boolean) => {
+    const resolvedIncludeSubfolders = includeSubfolders ?? state.settings.includeSubfoldersByDefault;
     await withBusy(
       path ? "Adding folder..." : "Waiting for folder selection...",
       async () => {
         if (path) {
-          await api.createFolder(path, includeSubfolders);
+          await api.createFolder(path, resolvedIncludeSubfolders);
         } else {
-          await api.pickFolder(includeSubfolders);
+          await api.pickFolder(resolvedIncludeSubfolders);
         }
         await refreshData();
       },
       { successMessage: "Folder added." },
     );
-  }, [refreshData, withBusy]);
+  }, [refreshData, state.settings.includeSubfoldersByDefault, withBusy]);
 
   const addPhotos = useCallback(async () => {
     await withBusy(
@@ -491,6 +501,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [refreshData, withBusy]);
 
   const removeFolder = useCallback(async (id: string) => {
+    if (state.settings.confirmDestructiveActions && !window.confirm("Remove this folder and its indexed data?")) {
+      return;
+    }
     await withBusy(
       "Removing folder...",
       async () => {
@@ -499,7 +512,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
       { successMessage: "Folder removed." },
     );
-  }, [refreshData, withBusy]);
+  }, [refreshData, state.settings.confirmDestructiveActions, withBusy]);
 
   const startIndexing = useCallback(async (options?: StartIndexingOptions) => {
     const nextFolderPaths = options?.folderPaths ?? state.folders.map((folder) => folder.path);
@@ -659,6 +672,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [refreshData, withBusy]);
 
   const deleteCollection = useCallback(async (id: string) => {
+    if (state.settings.confirmDestructiveActions && !window.confirm("Delete this collection?")) {
+      return false;
+    }
     await withBusy(
       "Deleting collection...",
       async () => {
@@ -667,7 +683,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
       { successMessage: "Collection deleted." },
     );
-  }, [refreshData, withBusy]);
+    return true;
+  }, [refreshData, state.settings.confirmDestructiveActions, withBusy]);
 
   const saveSearch = useCallback(async (name: string, query: string, filters: Record<string, unknown>) => {
     await withBusy(
@@ -681,6 +698,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [refreshData, withBusy]);
 
   const deleteSavedSearch = useCallback(async (id: string) => {
+    if (state.settings.confirmDestructiveActions && !window.confirm("Delete this saved search?")) {
+      return;
+    }
     await withBusy(
       "Deleting saved search...",
       async () => {
@@ -689,7 +709,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
       { successMessage: "Saved search deleted." },
     );
-  }, [refreshData, withBusy]);
+  }, [refreshData, state.settings.confirmDestructiveActions, withBusy]);
 
   const searchImages = useCallback(async (query: string, filters?: SearchFilters) => {
     try {
@@ -734,6 +754,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const updateSettings = useCallback(async (changes: Partial<AppSettings>) => {
+    const nextSettings = await api.updateAppSettings(changes);
+    setState((prev) => ({ ...prev, settings: nextSettings }));
+    return nextSettings;
+  }, []);
+
   return (
     <AppContext.Provider value={{
       ...state,
@@ -760,6 +786,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       searchSimilarImages,
       searchImagesByFile,
       refreshData,
+      updateSettings,
     }}>
       {children}
     </AppContext.Provider>

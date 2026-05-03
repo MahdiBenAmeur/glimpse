@@ -40,16 +40,21 @@ def _ensure_image_store_metadata(meta_data: dict, image_model: BaseEmbeddingMode
         )
 
 
-def load_image_vector_store(emb_dim: int, image_model: BaseEmbeddingModel) -> tuple[faiss.Index, dict]:
+def load_image_vector_store(emb_dim: int | None = None, image_model: BaseEmbeddingModel | None = None) -> tuple[faiss.Index, dict]:
     global image_vs
     global image_meta_data
 
     if image_vs is not None and image_meta_data is not None:
-        _ensure_image_store_metadata(image_meta_data, image_model, emb_dim)
+        resolved_dim = int(emb_dim if emb_dim is not None else image_meta_data.get("_embedding_dim") or 512)
+        if image_model is not None:
+            _ensure_image_store_metadata(image_meta_data, image_model, resolved_dim)
         return image_vs, image_meta_data
 
-    image_vs, image_meta_data = load_or_init_vector_store(IMAGE_VS_PATH, emb_dim=emb_dim)
-    _ensure_image_store_metadata(image_meta_data, image_model, emb_dim)
+    resolved_dim = int(emb_dim or 512)
+    image_vs, image_meta_data = load_or_init_vector_store(IMAGE_VS_PATH, emb_dim=resolved_dim)
+    resolved_dim = int(image_meta_data.get("_embedding_dim") or resolved_dim)
+    if image_model is not None:
+        _ensure_image_store_metadata(image_meta_data, image_model, resolved_dim)
     return image_vs, image_meta_data
 
 

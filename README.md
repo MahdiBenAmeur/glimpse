@@ -26,6 +26,8 @@ npm install
 cd ..
 ```
 
+Note: `requirements.txt` installs the CPU version of PyTorch by default. If you want GPU acceleration, install a PyTorch GPU build that matches your CUDA/runtime setup after installing the requirements.
+
 ### Electron
 if you want to use electron to lanch as a desktop app
 
@@ -77,7 +79,7 @@ If this is the first time you use the app, you will also need to download and ac
 - `electron/`: desktop launcher that boots backend and frontend, then opens the app window
 - `scripts/`: maintenance and inspection scripts for local data and clustering analysis
 - `test_images/`: sample images for manual testing
-- `requirements.txt`: root Python dependency entry that delegates to `backend/requirements.txt`
+- `requirements.txt`: root Python dependency file for the backend/runtime
 - `FEATURES.md`: broader product feature inventory
 
 ### Backend

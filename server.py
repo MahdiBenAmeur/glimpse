@@ -15,6 +15,7 @@ from backend.api.index import router as index_router
 from backend.api.people import router as people_router
 from backend.api.saved_searches import router as saved_searches_router
 from backend.api.search import router as search_router
+from backend.api.settings import router as settings_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -46,6 +47,7 @@ app.include_router(index_router, prefix="/api")
 app.include_router(people_router, prefix="/api")
 app.include_router(saved_searches_router, prefix="/api")
 app.include_router(search_router, prefix="/api")
+app.include_router(settings_router, prefix="/api")
 
 @app.get("/")
 def root():
