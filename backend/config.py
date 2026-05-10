@@ -1,4 +1,3 @@
-import torch
 from pathlib import Path
 
 from platformdirs import user_config_dir , user_cache_dir
@@ -7,8 +6,8 @@ import os
 APP_NAME = "Glimpse"
 APP_AUTHOR = "Glimpse_one"
 
-DATA_DIR = Path(user_config_dir(APP_NAME, APP_AUTHOR))
-CACHE_DIR = Path(user_cache_dir(APP_NAME, APP_AUTHOR))
+#DATA_DIR = Path(user_config_dir(APP_NAME, APP_AUTHOR))
+#CACHE_DIR = Path(user_cache_dir(APP_NAME, APP_AUTHOR))
 
 DATA_DIR = Path("backend/data")
 CACHE_DIR = Path("backend/data")
@@ -37,7 +36,7 @@ IMAGE_VS_PATH = DATA_DIR / "image_vector_store"
 IMAGE_META_PATH = IMAGE_VS_PATH / "meta_data.json"
 
 # GENERAL MODEL CONFIG
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cpu"
 
 models_cache_dir = DATA_DIR / "cache_dir"
 

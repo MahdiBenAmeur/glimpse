@@ -1,9 +1,13 @@
 # NOTE:
 # This requirements file installs the CPU version of PyTorch by default.
+# The PyTorch CPU wheel index is required for the +cpu package builds.
 # If you want to use GPU acceleration, install your own compatible PyTorch GPU version
 # for your CUDA/runtime setup after installing these requirements.
-torch==2.10.0
-torchvision==0.26.0
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+torch==2.8.0+cpu
+torchvision==0.23.0+cpu
+torchaudio==2.8.0+cpu
 
 fastapi==0.135.3
 uvicorn==0.44.0

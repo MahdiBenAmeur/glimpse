@@ -20,7 +20,7 @@ electron/node_modules
 glimpse.db
 hello
 
-
+serve_with_port.py
 desktop_app
 venv
 dist
@@ -30,3 +30,5 @@ commends
 test.py
 gpu_venv
 electron
+
+glimpse_cpu_venv
