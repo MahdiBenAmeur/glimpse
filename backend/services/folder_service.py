@@ -10,6 +10,9 @@ from backend.utils.path_utils import canonicalize_path, canonicalize_path_key
 
 
 def _folder_score(folder: Folder) -> tuple[int, int, int]:
+    """
+    Calculates a priority score for a folder.
+    """
     return (
         int(folder.image_count or 0),
         1 if folder.last_scan_time is not None else 0,
@@ -18,6 +21,9 @@ def _folder_score(folder: Folder) -> tuple[int, int, int]:
 
 
 def _dedupe_visible_folders(folders: list[Folder]) -> list[Folder]:
+    """
+    Removes duplicate folder records by path.
+    """
     best_by_key: dict[str, Folder] = {}
     for folder in folders:
         key = canonicalize_path_key(folder.path)
@@ -29,6 +35,9 @@ def _dedupe_visible_folders(folders: list[Folder]) -> list[Folder]:
 
 
 def _find_matching_folders(session: Session, path: str) -> list[Folder]:
+    """
+    Finds all database records matching a path.
+    """
     target_key = canonicalize_path_key(path)
     matches = [
         folder
@@ -41,6 +50,9 @@ def _find_matching_folders(session: Session, path: str) -> list[Folder]:
 
 
 def _find_existing_folder(session: Session, path: str) -> Folder | None:
+    """
+    Finds the best existing record for a path.
+    """
     matches = _find_matching_folders(session, path)
     if not matches:
         return None
@@ -49,6 +61,9 @@ def _find_existing_folder(session: Session, path: str) -> Folder | None:
 
 
 def _path_is_within_folder(image_path: str, folder_path: str) -> bool:
+    """
+    Checks if a file path is inside a folder.
+    """
     resolved_image_path = Path(canonicalize_path(image_path))
     resolved_folder_path = Path(canonicalize_path(folder_path))
     try:
@@ -59,6 +74,9 @@ def _path_is_within_folder(image_path: str, folder_path: str) -> bool:
 
 
 def _purge_indexed_folder_data(folder_path: str) -> None:
+    """
+    Removes indexed data for all images in a folder.
+    """
     def matches_folder(image_path: str) -> bool:
         return _path_is_within_folder(image_path, folder_path)
 
@@ -68,6 +86,9 @@ def _purge_indexed_folder_data(folder_path: str) -> None:
 
 
 def _collapse_duplicate_folders(session: Session, keep_folder: Folder, *, path: str) -> None:
+    """
+    Deletes redundant folder records.
+    """
     duplicates = [
         folder
         for folder in _find_matching_folders(session, path)
@@ -84,6 +105,9 @@ def _collapse_duplicate_folders(session: Session, keep_folder: Folder, *, path: 
 class FolderService:
     @staticmethod
     def create(session: Session, folder_in: FolderCreate) -> Folder:
+        """
+        Registers a new folder or updates an existing one.
+        """
         payload = folder_in.model_dump()
         payload["path"] = canonicalize_path(payload["path"])
         existing = _find_existing_folder(session, payload["path"])
@@ -103,16 +127,25 @@ class FolderService:
 
     @staticmethod
     def get(session: Session, folder_id: int) -> Optional[Folder]:
+        """
+        Retrieves a folder by ID.
+        """
         return session.get(Folder, folder_id)
 
     @staticmethod
     def get_all(session: Session, skip: int = 0, limit: int = 100) -> List[Folder]:
+        """
+        Lists unique folders.
+        """
         folders = session.exec(select(Folder)).all()
         visible = _dedupe_visible_folders(folders)
         return visible[skip : skip + limit]
 
     @staticmethod
     def update(session: Session, folder_id: int, folder_in: FolderUpdate) -> Optional[Folder]:
+        """
+        Updates folder configuration.
+        """
         db_folder = session.get(Folder, folder_id)
         if not db_folder:
             return None
@@ -128,6 +161,9 @@ class FolderService:
 
     @staticmethod
     def delete(session: Session, folder_id: int) -> bool:
+        """
+        Removes a folder and its indexed data.
+        """
         db_folder = session.get(Folder, folder_id)
         if not db_folder:
             return False

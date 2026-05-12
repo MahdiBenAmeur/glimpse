@@ -18,8 +18,7 @@ def create_db_and_tables() -> None:
 
 def get_session() -> Generator[Session, None, None]:
     """
-    Provides a database session for querying, automatically handling cleanup.
-    Usage example in FastAPI: `session: Session = Depends(get_session)`
+    Provides a database session.
     """
     with Session(engine) as session:
         yield session

@@ -6,6 +6,9 @@ from typing import List, Optional
 class CollectionService:
     @staticmethod
     def create(session: Session, collection_in: CollectionCreate) -> Collection:
+        """
+        Creates a new collection.
+        """
         collection = Collection.model_validate(collection_in)
         session.add(collection)
         session.commit()
@@ -14,14 +17,23 @@ class CollectionService:
 
     @staticmethod
     def get(session: Session, collection_id: int) -> Optional[Collection]:
+        """
+        Retrieves a collection by ID.
+        """
         return session.get(Collection, collection_id)
 
     @staticmethod
     def get_all(session: Session, skip: int = 0, limit: int = 100) -> List[Collection]:
+        """
+        Retrieves all collections.
+        """
         return session.exec(select(Collection).offset(skip).limit(limit)).all()
 
     @staticmethod
     def update(session: Session, collection_id: int, collection_in: CollectionUpdate) -> Optional[Collection]:
+        """
+        Updates a collection.
+        """
         db_collection = session.get(Collection, collection_id)
         if not db_collection:
             return None
@@ -36,6 +48,9 @@ class CollectionService:
 
     @staticmethod
     def delete(session: Session, collection_id: int) -> bool:
+        """
+        Deletes a collection.
+        """
         db_collection = session.get(Collection, collection_id)
         if not db_collection:
             return False

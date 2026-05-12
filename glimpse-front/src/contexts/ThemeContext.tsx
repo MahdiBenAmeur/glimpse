@@ -9,10 +9,16 @@ interface ThemeContextType {
 
 const ThemeContext = createContext<ThemeContextType | null>(null);
 
+/**
+ * Checks if the system preference is dark mode.
+ */
 function getSystemDark() {
   return window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
+/**
+ * Provides theme state and management to the application.
+ */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => {
     return (localStorage.getItem("glimpse-theme") as Theme) || "system";
@@ -46,6 +52,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * Custom hook to access the theme context.
+ */
 export function useTheme() {
   const ctx = useContext(ThemeContext);
   if (!ctx) throw new Error("useTheme must be used within ThemeProvider");

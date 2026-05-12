@@ -24,6 +24,9 @@ class ImportImagesResponse(BaseModel):
 
 
 def _get_or_create_folder_record(session: Session, *, path: str, include_subfolders: bool) -> Folder:
+    """
+    Ensures a database record exists for a given file system path.
+    """
     return FolderService.create(
         session=session,
         folder_in=FolderCreate(
@@ -37,14 +40,23 @@ def _get_or_create_folder_record(session: Session, *, path: str, include_subfold
 
 @router.post("/", response_model=FolderRead)
 def create_folder(folder_in: FolderCreate, session: Session = Depends(get_session)):
+    """
+    Creates a new folder record in the database.
+    """
     return FolderService.create(session=session, folder_in=folder_in)
 
 @router.get("/", response_model=List[FolderRead])
 def read_folders(skip: int = 0, limit: int = 100, session: Session = Depends(get_session)):
+    """
+    Lists all registered folders.
+    """
     return FolderService.get_all(session=session, skip=skip, limit=limit)
 
 @router.get("/{folder_id}", response_model=FolderRead)
 def read_folder(folder_id: int, session: Session = Depends(get_session)):
+    """
+    Retrieves details for a specific folder.
+    """
     folder = FolderService.get(session=session, folder_id=folder_id)
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
@@ -52,6 +64,9 @@ def read_folder(folder_id: int, session: Session = Depends(get_session)):
 
 @router.patch("/{folder_id}", response_model=FolderRead)
 def update_folder(folder_id: int, folder_in: FolderUpdate, session: Session = Depends(get_session)):
+    """
+    Updates folder configuration.
+    """
     folder = FolderService.update(session=session, folder_id=folder_id, folder_in=folder_in)
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
@@ -59,6 +74,9 @@ def update_folder(folder_id: int, folder_in: FolderUpdate, session: Session = De
 
 @router.delete("/{folder_id}")
 def delete_folder(folder_id: int, session: Session = Depends(get_session)):
+    """
+    Removes a folder record from the database.
+    """
     success = FolderService.delete(session=session, folder_id=folder_id)
     if not success:
         raise HTTPException(status_code=404, detail="Folder not found")
@@ -67,6 +85,9 @@ def delete_folder(folder_id: int, session: Session = Depends(get_session)):
 
 @router.post("/pick", response_model=FolderRead)
 def pick_folder(payload: PickFolderRequest, session: Session = Depends(get_session)):
+    """
+    Opens a folder picker and registers the selected path.
+    """
     selected_path = pick_folder_path()
     if not selected_path:
         raise HTTPException(status_code=400, detail="Folder selection was cancelled")
@@ -80,6 +101,9 @@ def pick_folder(payload: PickFolderRequest, session: Session = Depends(get_sessi
 
 @router.post("/import-images", response_model=ImportImagesResponse)
 def import_images(session: Session = Depends(get_session)):
+    """
+    Opens a file picker to import and index specific image files.
+    """
     selected_paths = pick_image_paths()
     if not selected_paths:
         raise HTTPException(status_code=400, detail="Image selection was cancelled")

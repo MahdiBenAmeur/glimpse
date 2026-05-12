@@ -6,6 +6,9 @@ from typing import List, Optional
 class ImageService:
     @staticmethod
     def create(session: Session, image_in: ImageCreate) -> Image:
+        """
+        Creates a new image record.
+        """
         image = Image.model_validate(image_in)
         session.add(image)
         session.commit()
@@ -14,14 +17,23 @@ class ImageService:
 
     @staticmethod
     def get(session: Session, image_id: int) -> Optional[Image]:
+        """
+        Retrieves an image by ID.
+        """
         return session.get(Image, image_id)
 
     @staticmethod
     def get_all(session: Session, skip: int = 0, limit: int = 100) -> List[Image]:
+        """
+        Lists image records.
+        """
         return session.exec(select(Image).offset(skip).limit(limit)).all()
 
     @staticmethod
     def update(session: Session, image_id: int, image_in: ImageUpdate) -> Optional[Image]:
+        """
+        Updates an image record.
+        """
         db_image = session.get(Image, image_id)
         if not db_image:
             return None
@@ -35,6 +47,9 @@ class ImageService:
 
     @staticmethod
     def delete(session: Session, image_id: int) -> bool:
+        """
+        Deletes an image record.
+        """
         db_image = session.get(Image, image_id)
         if not db_image:
             return False

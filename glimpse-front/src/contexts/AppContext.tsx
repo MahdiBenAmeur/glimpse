@@ -84,6 +84,9 @@ interface AppContextType extends AppState {
 const AppContext = createContext<AppContextType | null>(null);
 const UI_STATE_KEY = "glimpse-one-ui-state";
 
+/**
+ * Loads UI-specific state from local storage.
+ */
 function loadPersistedUiState() {
   const raw = localStorage.getItem(UI_STATE_KEY);
   if (!raw) return { hideOnboardingWhileIndexing: false };
@@ -98,14 +101,23 @@ function loadPersistedUiState() {
   }
 }
 
+/**
+ * Persists UI-specific state to local storage.
+ */
 function persistUiState(nextState: { hideOnboardingWhileIndexing: boolean }) {
   localStorage.setItem(UI_STATE_KEY, JSON.stringify(nextState));
 }
 
+/**
+ * Checks if the given phase represents an active indexing process.
+ */
 function isIndexingPhase(phase: IndexingPhase) {
   return phase !== "idle" && phase !== "complete" && phase !== "cancelled";
 }
 
+/**
+ * Derives the current onboarding step based on the application state.
+ */
 function deriveOnboardingState(
   activeModel: ModelInfo | null,
   folders: FolderInfo[],
@@ -126,6 +138,9 @@ function deriveOnboardingState(
   return { isFirstLaunch: false, onboardingStep: 3 };
 }
 
+/**
+ * Updates the model list to set a specific model as active.
+ */
 function markModelAsActive(models: ModelInfo[], modelId: string) {
   const nextModels = models.map((model) => {
     if (model.id === modelId) {
@@ -143,11 +158,17 @@ function markModelAsActive(models: ModelInfo[], modelId: string) {
   };
 }
 
+/**
+ * Extracts a user-friendly message from an error object.
+ */
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
   return "Something went wrong";
 }
 
+/**
+ * Core application provider that manages state, indexing, and data fetching.
+ */
 export function AppProvider({ children }: { children: ReactNode }) {
   const persistedUiState = useMemo(loadPersistedUiState, []);
   const initializedRef = useRef(false);
@@ -173,11 +194,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     settings: api.DEFAULT_APP_SETTINGS,
   });
 
+  /**
+   * Toggles the visibility of onboarding while indexing runs in the background.
+   */
   const setBackgroundIndexingHidden = useCallback((hidden: boolean) => {
     setHideOnboardingWhileIndexing(hidden);
     persistUiState({ hideOnboardingWhileIndexing: hidden });
   }, []);
 
+  /**
+   * Wrapper for async actions that displays a busy overlay and handles notifications.
+   */
   const withBusy = useCallback(async <T,>(
     message: string,
     action: () => Promise<T>,
@@ -203,6 +230,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  /**
+   * Refreshes all application data from the backend.
+   */
   const refreshData = useCallback(async (options?: { showLoader?: boolean }) => {
     const showLoader = options?.showLoader ?? false;
     if (showLoader) {
@@ -317,15 +347,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(interval);
   }, [hideOnboardingWhileIndexing, refreshData, setBackgroundIndexingHidden, state.indexingStatus.phase]);
 
+  /**
+   * Sets the current step in the onboarding flow.
+   */
   const setOnboardingStep = useCallback((step: number) => {
     setState((prev) => ({ ...prev, onboardingStep: step, isFirstLaunch: step < 3 || prev.isFirstLaunch }));
   }, []);
 
+  /**
+   * Marks the onboarding flow as complete.
+   */
   const completeOnboarding = useCallback(() => {
     setBackgroundIndexingHidden(false);
     setState((prev) => ({ ...prev, isFirstLaunch: false, onboardingStep: 3 }));
   }, [setBackgroundIndexingHidden]);
 
+  /**
+   * Initiates the download of a model and polls for progress.
+   */
   const downloadModel = useCallback(async (id: string) => {
     const setDownloadProgress = (progress: number) => {
       setState((prev) => ({
@@ -365,6 +404,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [refreshData, withBusy]);
 
+  /**
+   * Sets a specific model as the active embedding model.
+   */
   const setActiveModel = useCallback(async (id: string) => {
     await withBusy(
       "Selecting model...",
@@ -376,6 +418,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, [refreshData, withBusy]);
 
+  /**
+   * Switches to a new model and triggers a full index rebuild.
+   */
   const switchModelAndRebuild = useCallback(async (id: string) => {
     await withBusy(
       "Switching model and rebuilding index...",
@@ -458,6 +503,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, [refreshData, setBackgroundIndexingHidden, state.folders, withBusy]);
 
+  /**
+   * Removes a downloaded model from the system.
+   */
   const removeModel = useCallback(async (id: string) => {
     if (state.settings.confirmDestructiveActions && !window.confirm("Delete this downloaded model?")) {
       return;
@@ -472,6 +520,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, [refreshData, state.settings.confirmDestructiveActions, withBusy]);
 
+  /**
+   * Adds a folder to the library for indexing.
+   */
   const addFolder = useCallback(async (path?: string, includeSubfolders?: boolean) => {
     const resolvedIncludeSubfolders = includeSubfolders ?? state.settings.includeSubfoldersByDefault;
     await withBusy(
@@ -488,6 +539,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, [refreshData, state.settings.includeSubfoldersByDefault, withBusy]);
 
+  /**
+   * Imports specific photo files into the library.
+   */
   const addPhotos = useCallback(async () => {
     await withBusy(
       "Waiting for image selection...",
@@ -500,6 +554,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, [refreshData, withBusy]);
 
+  /**
+   * Removes a folder and its indexed data from the library.
+   */
   const removeFolder = useCallback(async (id: string) => {
     if (state.settings.confirmDestructiveActions && !window.confirm("Remove this folder and its indexed data?")) {
       return;
@@ -514,6 +571,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, [refreshData, state.settings.confirmDestructiveActions, withBusy]);
 
+  /**
+   * Starts the indexing process for specific folders or the entire library.
+   */
   const startIndexing = useCallback(async (options?: StartIndexingOptions) => {
     const nextFolderPaths = options?.folderPaths ?? state.folders.map((folder) => folder.path);
     const nextFolderIds = options?.folderIds;
@@ -563,6 +623,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [refreshData, setBackgroundIndexingHidden, state.activeModel?.id, state.folders]);
 
+  /**
+   * Requests the cancellation of the current indexing process.
+   */
   const cancelIndexing = useCallback(async () => {
     try {
       const nextStatus = await api.cancelIndexing();
@@ -598,11 +661,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [refreshData, setBackgroundIndexingHidden]);
 
+  /**
+   * Hides the indexing progress and returns the user to the main app.
+   */
   const runInBackground = useCallback(() => {
     setBackgroundIndexingHidden(true);
     setState((prev) => ({ ...prev, isFirstLaunch: false, onboardingStep: 3 }));
   }, [setBackgroundIndexingHidden]);
 
+  /**
+   * Toggles the favorite status of an image.
+   */
   const toggleFavorite = useCallback((imageId: string) => {
     let nextFavorite = false;
 
@@ -637,6 +706,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
   }, [refreshData]);
 
+  /**
+   * Updates the name of a detected person.
+   */
   const renamePerson = useCallback(async (personId: string, name: string) => {
     await withBusy(
       "Saving person name...",
@@ -648,6 +720,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, [refreshData, withBusy]);
 
+  /**
+   * Merges two person profiles into a single identity.
+   */
   const mergePerson = useCallback(async (targetPersonId: string, sourcePersonId: string) => {
     return withBusy(
       "Merging people...",
@@ -660,6 +735,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, [refreshData, withBusy]);
 
+  /**
+   * Creates a new user-defined image collection.
+   */
   const createCollection = useCallback(async (name: string, description?: string) => {
     await withBusy(
       "Creating collection...",
@@ -671,6 +749,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, [refreshData, withBusy]);
 
+  /**
+   * Deletes an image collection.
+   */
   const deleteCollection = useCallback(async (id: string) => {
     if (state.settings.confirmDestructiveActions && !window.confirm("Delete this collection?")) {
       return false;
@@ -686,6 +767,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return true;
   }, [refreshData, state.settings.confirmDestructiveActions, withBusy]);
 
+  /**
+   * Saves the current search query and filters.
+   */
   const saveSearch = useCallback(async (name: string, query: string, filters: Record<string, unknown>) => {
     await withBusy(
       "Saving search...",
@@ -697,6 +781,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, [refreshData, withBusy]);
 
+  /**
+   * Deletes a previously saved search.
+   */
   const deleteSavedSearch = useCallback(async (id: string) => {
     if (state.settings.confirmDestructiveActions && !window.confirm("Delete this saved search?")) {
       return;
@@ -711,6 +798,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, [refreshData, state.settings.confirmDestructiveActions, withBusy]);
 
+  /**
+   * Executes an image search with specific filters.
+   */
   const searchImages = useCallback(async (query: string, filters?: SearchFilters) => {
     try {
       const results = await api.searchImages({
@@ -732,6 +822,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [state.activeModel?.id]);
 
+  /**
+   * Searches for images similar to a specific indexed image.
+   */
   const searchSimilarImages = useCallback(async (imageId: string | number) => {
     try {
       const results = await api.getSimilarImages(imageId);
@@ -743,6 +836,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  /**
+   * Performs a visual search using an uploaded image file.
+   */
   const searchImagesByFile = useCallback(async (file: File) => {
     try {
       const results = await api.searchByImageFile(file);
@@ -754,6 +850,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  /**
+   * Updates application settings.
+   */
   const updateSettings = useCallback(async (changes: Partial<AppSettings>) => {
     const nextSettings = await api.updateAppSettings(changes);
     setState((prev) => ({ ...prev, settings: nextSettings }));
@@ -793,6 +892,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * Custom hook to access the application context.
+ */
 export function useApp() {
   const ctx = useContext(AppContext);
   if (!ctx) throw new Error("useApp must be used within AppProvider");
