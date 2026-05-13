@@ -28,10 +28,12 @@ def _validate_page_number(page_number: int) -> int:
 
 
 def _normalize_similarity(score: float) -> float:
+    """Map cosine-style similarity from [-1, 1] into a clamped [0, 1] score."""
     return max(0.0, min(1.0, (float(score) + 1.0) / 2.0))
 
 
 def _parse_created_at(value: str | None) -> datetime | None:
+    """Parse common metadata date formats into a datetime for filtering."""
     if value is None:
         return None
 
@@ -55,6 +57,7 @@ def _parse_created_at(value: str | None) -> datetime | None:
 
 
 def _normalize_face_presence(face_presence: str) -> str:
+    """Normalize and validate the requested face-presence filter mode."""
     normalized = str(face_presence).strip().lower().replace(" ", "_")
     if normalized not in {"any", "contains_faces", "no_faces"}:
         raise ValueError("face_presence must be one of: any, contains_faces, no_faces")
@@ -62,6 +65,7 @@ def _normalize_face_presence(face_presence: str) -> str:
 
 
 def _normalize_folder_filters(folders: Sequence[str | Path] | str | Path | None) -> list[Path]:
+    """Resolve optional folder filters into absolute Path objects."""
     if folders is None:
         return []
     if isinstance(folders, (str, Path)):
@@ -70,6 +74,7 @@ def _normalize_folder_filters(folders: Sequence[str | Path] | str | Path | None)
 
 
 def _image_in_folders(image_path: str | None, folders: list[Path]) -> bool:
+    """Return whether an image belongs to at least one resolved folder filter."""
     if not folders:
         return True
     if not image_path:
@@ -83,6 +88,12 @@ def _image_in_folders(image_path: str | None, folders: list[Path]) -> bool:
 
 
 def _normalize_person_filters(person_filters: dict | Sequence[dict] | None) -> dict[str, set[int]]:
+    """Convert incoming person filters into must/prefer/exclude id sets.
+
+    The API accepts either a compact mapping of person_id to preference or a
+    list of objects. Normalizing both shapes here keeps the ranking loop focused
+    on set operations instead of request payload details.
+    """
     normalized = {
         "must_include": set(),
         "prefer": set(),
@@ -117,6 +128,7 @@ def _normalize_person_filters(person_filters: dict | Sequence[dict] | None) -> d
 
 
 def _build_image_face_context(face_meta_data: dict) -> tuple[set[str], dict[str, set[int]]]:
+    """Build quick lookup tables for image face presence and person membership."""
     images_with_faces: set[str] = set()
     image_path_2_person_ids: dict[str, set[int]] = {}
 
@@ -137,6 +149,7 @@ def _build_image_face_context(face_meta_data: dict) -> tuple[set[str], dict[str,
 
 
 def _collect_face_photo_scores(face_results: list[dict]) -> dict[str, float]:
+    """Keep the best normalized face-match score found for each image path."""
     image_path_2_score: dict[str, float] = {}
 
     for face_result in face_results:
@@ -155,6 +168,7 @@ def _collect_face_photo_scores(face_results: list[dict]) -> dict[str, float]:
 
 
 def _collect_image_matches(scores: np.ndarray, ids: np.ndarray, image_meta_data: dict) -> list[dict]:
+    """Combine FAISS image search scores and ids with stored image metadata."""
     matches = []
     for score, item_id in zip(scores[0], ids[0]):
         item_id = int(item_id)
@@ -174,6 +188,7 @@ def _collect_image_matches(scores: np.ndarray, ids: np.ndarray, image_meta_data:
 
 
 def _collect_face_matches(scores: np.ndarray, ids: np.ndarray, face_meta_data: dict) -> list[dict]:
+    """Combine FAISS face search scores and ids with stored face metadata."""
     matches = []
     for score, face_id in zip(scores[0], ids[0]):
         face_id = int(face_id)
@@ -195,6 +210,7 @@ def _collect_face_matches(scores: np.ndarray, ids: np.ndarray, face_meta_data: d
 
 
 def search_by_text(text: str, image_model: BaseEmbeddingModel, top_k: int = 10) -> list[dict]:
+    """Search indexed images by embedding a text query into the image model space."""
     if not text.strip():
         raise ValueError("text must not be empty")
 
@@ -216,6 +232,7 @@ def search_by_image(
     image_model: BaseEmbeddingModel,
     top_k: int = 10,
 ) -> list[dict]:
+    """Search indexed images by embedding a query image."""
     top_k = _validate_top_k(top_k)
     image_embedding = image_model.embed_image(image)
     emb_dim = int(image_embedding.shape[-1])
@@ -230,6 +247,12 @@ def search_by_image(
 
 
 def search_by_face(image_path: str | Path, top_k: int = 10) -> list[dict]:
+    """Search indexed faces for each detected face in the query image.
+
+    A single query image can contain multiple faces, so the return value is a
+    list of per-query-face result groups. Each group preserves the detected box
+    and includes the closest indexed faces from the face vector store.
+    """
     top_k = _validate_top_k(top_k)
     query_path = Path(image_path)
     if not query_path.is_file():
@@ -272,6 +295,7 @@ def search_by_face(image_path: str | Path, top_k: int = 10) -> list[dict]:
 
 
 def search_by_person_id(person_id: int) -> dict:
+    """Return public metadata for one indexed person."""
     person_id = int(person_id)
     _, person_meta_data = load_person_vector_store()
     person_entry = person_meta_data.get(str(person_id))
@@ -297,6 +321,15 @@ def global_search(
     person_filters: dict | Sequence[dict] | None = None,
     face_photo_path: str | Path | None = None,
 ) -> dict:
+    """Run combined text, folder, date, face, and person-aware search.
+
+    Text queries search the full image vector store and use those scores as the
+    initial candidate order. When no text is provided, all indexed images become
+    candidates so face-photo/person filters can still work. Each candidate is
+    filtered by folder, date, face presence, must-include people, and excluded
+    people; remaining candidates are ranked by the average of available text,
+    face-photo, and preferred-person score components, then paginated.
+    """
     normalized_query = query.strip()
     if not normalized_query and face_photo_path is None:
         raise ValueError("query must not be empty unless a face photo search is provided")

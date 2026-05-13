@@ -24,6 +24,7 @@ def _log_face_indexing(message: str, **fields) -> None:
 
 
 def _gpu_memory_snapshot() -> dict[str, float | int | str]:
+    """Return lightweight CUDA memory counters for face-indexing logs."""
     if not torch.cuda.is_available():
         return {"cuda": "unavailable"}
 
@@ -43,6 +44,13 @@ def index_face_batch(
     path_2_created_at: dict[Path, str | None] | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict:
+    """Run the face indexing pipeline for a batch of images.
+
+    The pipeline detects faces, crops each detected box, embeds the crops in
+    smaller model batches, and appends the resulting vectors to the face store.
+    It records counts at each stage and checks for cancellation between model
+    calls where stopping is cheap and leaves existing stores consistent.
+    """
     if validate_inputs:
         valid_paths, failed_items, prepared_created_at = prepare_images(image_paths)
         path_2_created_at = prepared_created_at

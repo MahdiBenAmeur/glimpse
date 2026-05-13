@@ -54,6 +54,7 @@ def _log_face_store(message: str, **fields: Any) -> None:
 # ---------------------------------------------------------------------------
 
 def reset_face_vector_stores() -> None:
+    """Clear cached face and person stores so subsequent calls reload from disk."""
     global face_vs, face_meta_data, person_vs, person_meta_data
     _log_face_store(
         "Resetting cached face stores",
@@ -69,6 +70,7 @@ def reset_face_vector_stores() -> None:
 
 
 def load_face_vector_store():
+    """Load or initialize the face-level vector store and metadata cache."""
     global face_vs, face_meta_data
     if face_vs is not None and face_meta_data is not None:
         return face_vs, face_meta_data
@@ -83,6 +85,7 @@ def load_face_vector_store():
 
 
 def load_person_vector_store():
+    """Load or initialize the person-level vector store and metadata cache."""
     global person_vs, person_meta_data
     if person_vs is not None and person_meta_data is not None:
         return person_vs, person_meta_data
@@ -97,6 +100,7 @@ def load_person_vector_store():
 
 
 def save_face_vector_stores() -> None:
+    """Persist both face-level and person-level vector stores to disk."""
     face_vector_store, face_store_meta_data = load_face_vector_store()
     person_vector_store, person_store_meta_data = load_person_vector_store()
     _log_face_store(
@@ -116,12 +120,14 @@ def save_face_vector_stores() -> None:
 # ---------------------------------------------------------------------------
 
 def _normalize_embedding(embedding: torch.Tensor) -> torch.Tensor:
+    """Convert an embedding to a 1D normalized float32 CPU tensor."""
     vector = embedding.detach().cpu().to(torch.float32).reshape(-1)
     norm = vector.norm().clamp_min(1e-12)
     return vector / norm
 
 
 def _empty_index() -> faiss.IndexIDMap2:
+    """Create an empty inner-product FAISS index with explicit ids."""
     return faiss.IndexIDMap2(faiss.IndexFlatIP(face_emb_dim))
 
 
@@ -135,11 +141,13 @@ def _face_box_area(face_box: list[float]) -> float:
 
 
 def _face_quality_weight(face_box: list[float]) -> float:
+    """Score a face by box size, capped to avoid oversized faces dominating."""
     area = _face_box_area(face_box)
     return min(FACE_MAX_QUALITY_SCORE, max(1.0, math.sqrt(area / FACE_QUALITY_REFERENCE_PIXELS)))
 
 
 def _face_sharpness_weight(image_path: Path, face_box: list[float]) -> float:
+    """Estimate crop sharpness from local pixel variation for exemplar ranking."""
     try:
         with Image.open(image_path) as image:
             left, top, right, bottom = [float(v) for v in face_box]
@@ -162,6 +170,7 @@ def _face_sharpness_weight(image_path: Path, face_box: list[float]) -> float:
 
 
 def _face_quality_score(image_path: Path, face_box: list[float], detection_confidence: float = 1.0) -> float:
+    """Combine size, sharpness, and detector confidence into one face quality score."""
     confidence = min(1.0, max(0.0, float(detection_confidence)))
     confidence_weight = 0.75 + (confidence * 0.5)
     quality = _face_quality_weight(face_box) * _face_sharpness_weight(image_path, face_box) * confidence_weight
@@ -181,6 +190,7 @@ def _make_face_sample(
     detection_confidence: float = 1.0,
     face_id: int | None = None,
 ) -> dict[str, Any]:
+    """Create the canonical in-memory representation of one detected face."""
     return {
         "face_id": face_id,
         "image_path": str(image_path),
@@ -198,6 +208,12 @@ def _flatten_face_samples(
     *,
     path_2_created_at: dict[Path, str | None] | None,
 ) -> list[dict[str, Any]]:
+    """Pair detected boxes with embeddings and flatten them into face samples.
+
+    The detector and embedder both keep image-path groupings, so this method
+    joins boxes and embeddings by path and position. Any embedding without a
+    matching box is ignored to avoid writing incomplete face metadata.
+    """
     samples: list[dict[str, Any]] = []
     for image_path, embeddings in path_2_embeddings.items():
         boxes = path_2_boxes.get(image_path, [])
@@ -224,6 +240,7 @@ def _flatten_face_samples(
 # ---------------------------------------------------------------------------
 
 def _make_top_face_entry(sample: dict[str, Any]) -> dict[str, Any]:
+    """Convert a face sample into a serializable exemplar entry."""
     return {
         "face_id": sample.get("face_id"),
         "embedding": _normalize_embedding(sample["embedding"]).tolist(),
@@ -236,6 +253,7 @@ def _make_top_face_entry(sample: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_top_face_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
+    """Validate and normalize a stored exemplar entry, dropping invalid ones."""
     if not isinstance(entry, dict):
         return None
     embedding = entry.get("embedding")
@@ -253,6 +271,7 @@ def _normalize_top_face_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _trim_top_faces(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Deduplicate exemplar faces and keep the highest-quality entries."""
     normalized_entries = []
     seen: set[tuple[str, tuple[float, ...]]] = set()
     for entry in entries:
@@ -276,6 +295,7 @@ def _trim_top_faces(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 def _iter_data_entries(meta_data: dict[str, Any]):
+    """Yield numeric metadata entries while skipping reserved underscore keys."""
     for key, entry in meta_data.items():
         if str(key).startswith("_") or not isinstance(entry, dict):
             continue
@@ -287,6 +307,7 @@ def _empty_person_metadata() -> dict[str, Any]:
 
 
 def _reset_person_store_in_memory() -> tuple[faiss.IndexIDMap2, dict[str, Any]]:
+    """Replace the cached person store with a fresh empty in-memory store."""
     global person_vs, person_meta_data
     person_vs = _empty_index()
     person_meta_data = _empty_person_metadata()
@@ -294,6 +315,13 @@ def _reset_person_store_in_memory() -> tuple[faiss.IndexIDMap2, dict[str, Any]]:
 
 
 def _ensure_person_state(entry: dict[str, Any]) -> dict[str, Any]:
+    """Backfill and normalize person metadata fields expected by current code.
+
+    Older or partial person records may be missing weighted sums, face ids, or
+    exemplar data. This function reconstructs safe defaults, normalizes the
+    centroid, preserves stored lists, and leaves the entry ready for indexing or
+    mutation by merge/add operations.
+    """
     image_paths = list(entry.get("image_paths", []))
     face_boxes = list(entry.get("face_boxes", []))
     image_created_ats = list(entry.get("image_created_ats", []))
@@ -334,6 +362,7 @@ def _ensure_person_state(entry: dict[str, Any]) -> dict[str, Any]:
 
 
 def _new_person_entry(sample: dict[str, Any]) -> dict[str, Any]:
+    """Create a person metadata entry seeded from the first face sample."""
     weight = float(sample.get("quality_score", 1.0))
     embedding_sum = _normalize_embedding(sample["embedding"]) * weight
     face_id = sample.get("face_id")
@@ -352,6 +381,7 @@ def _new_person_entry(sample: dict[str, Any]) -> dict[str, Any]:
 
 
 def _add_sample_to_person_entry(entry: dict[str, Any], sample: dict[str, Any]) -> None:
+    """Update a person centroid and metadata with another face sample."""
     person_entry = _ensure_person_state(entry)
     weight = float(sample.get("quality_score", 1.0))
     embedding_sum = (
@@ -375,6 +405,7 @@ def _add_sample_to_person_entry(entry: dict[str, Any], sample: dict[str, Any]) -
 
 
 def _rebuild_person_index(person_store_meta_data: dict[str, Any]):
+    """Recreate the person FAISS index from centroid metadata."""
     global person_vs
     rebuilt_index = _empty_index()
     for key in sorted(
@@ -393,6 +424,7 @@ def _rebuild_person_index(person_store_meta_data: dict[str, Any]):
 
 
 def _all_face_samples(face_vector_store, face_store_meta_data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Reconstruct all indexed face vectors into sample dictionaries."""
     samples = []
     for face_id, face_entry in _iter_data_entries(face_store_meta_data):
         try:
@@ -418,6 +450,7 @@ def _all_face_samples(face_vector_store, face_store_meta_data: dict[str, Any]) -
 # ---------------------------------------------------------------------------
 
 def _collect_named_people(person_store_meta_data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Capture named people before reclustering so names can be restored."""
     named_people = []
     for person_id, entry in _iter_data_entries(person_store_meta_data):
         name = entry.get("name")
@@ -432,6 +465,7 @@ def _collect_named_people(person_store_meta_data: dict[str, Any]) -> list[dict[s
 
 
 def _restore_named_people(named_people: list[dict[str, Any]], person_store_meta_data: dict[str, Any]) -> None:
+    """Reapply saved names to the new clusters with the most image overlap."""
     used_person_ids: set[int] = set()
     for named_person in named_people:
         best_person_id = None
@@ -452,6 +486,7 @@ def _restore_named_people(named_people: list[dict[str, Any]], person_store_meta_
 
 
 def _assign_faces_to_people(face_store_meta_data: dict[str, Any], person_store_meta_data: dict[str, Any]) -> None:
+    """Synchronize each face metadata entry with its current person assignment."""
     for _, face_entry in _iter_data_entries(face_store_meta_data):
         face_entry["person_id"] = None
     for person_id, entry in _iter_data_entries(person_store_meta_data):
@@ -475,6 +510,13 @@ def _merge_person_entries(
     person_store_meta_data: dict[str, Any],
     face_store_meta_data: dict[str, Any] | None = None,
 ) -> None:
+    """Merge source person metadata into target and update face assignments.
+
+    Centroids are merged through their stored weighted embedding sums rather
+    than by averaging already-normalized centroids. Metadata lists and exemplar
+    faces are concatenated, the best name is preserved, and any face metadata
+    pointing at the source id is retargeted before the source entry is removed.
+    """
     if target_id == source_id:
         return
     target_entry = _ensure_person_state(person_store_meta_data[str(target_id)])
@@ -527,8 +569,10 @@ def _cluster_face_samples_dbscan(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Cluster face samples into people using DBSCAN on cosine distance.
 
-    - Labelled clusters (label >= 0) become person entries.
-    - Noise points (label == -1) are left unassigned.
+    Embeddings are normalized and stacked into a matrix, then DBSCAN groups
+    nearby faces without requiring a known person count. Labelled clusters
+    become person entries, noise points (label == -1) stay unassigned, and face
+    metadata is updated with the new person id for each assigned sample.
     """
     stats = {
         "processed_face_count": len(samples),
@@ -602,6 +646,7 @@ def _cluster_face_samples_dbscan(
 # ---------------------------------------------------------------------------
 
 def merge_people(target_id: int, source_id: int) -> dict[str, Any]:
+    """Merge two existing person clusters and persist the updated stores."""
     if target_id == source_id:
         raise ValueError("Cannot merge a person into itself")
 
@@ -626,6 +671,13 @@ def merge_people(target_id: int, source_id: int) -> dict[str, Any]:
 
 
 def finalize_face_clusters(cancel_check: Callable[[], bool] | None = None) -> dict[str, Any]:
+    """Recluster all indexed faces into people and rebuild the person store.
+
+    This is the consolidation pass after faces have been appended. It
+    reconstructs every face vector, reclusters the full set, restores existing
+    person names by image overlap, writes person ids back onto face metadata,
+    and rebuilds the person-level FAISS index from the new centroids.
+    """
     global person_meta_data
 
     face_vector_store, face_store_meta_data = load_face_vector_store()
@@ -675,6 +727,13 @@ def add_faces_to_vector_store(
     path_2_created_at: dict[Path, str | None] | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ):
+    """Append newly embedded faces to the face vector store and metadata.
+
+    This function only writes face-level vectors and metadata. It intentionally
+    leaves person assignment as None because clustering is done later by
+    finalize_face_clusters, which considers the complete face store instead of
+    making local decisions from a single batch.
+    """
     face_vector_store, face_store_meta_data = load_face_vector_store()
     person_vector_store, _ = load_person_vector_store()
     stats = {
@@ -722,6 +781,12 @@ def add_faces_to_vector_store(
 
 
 def purge_face_entries(match_image_path: Callable[[str], bool]) -> dict[str, Any]:
+    """Remove face vectors for matching image paths and rebuild person clusters.
+
+    FAISS entries are rebuilt from the ids that remain, metadata is filtered in
+    lockstep, and then people are reclustered from the surviving faces. If no
+    faces remain, the person store is reset to an empty in-memory state.
+    """
     global face_vs, face_meta_data
 
     if face_vs is None or face_meta_data is None:

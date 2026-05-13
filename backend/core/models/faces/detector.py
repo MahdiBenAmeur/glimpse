@@ -18,6 +18,7 @@ def _log_face_detector(message: str, **fields) -> None:
 
 
 def _gpu_memory_snapshot() -> dict[str, float | int | str]:
+    """Return lightweight CUDA memory counters for detector logs."""
     if not torch.cuda.is_available():
         return {"cuda": "unavailable"}
 
@@ -29,6 +30,7 @@ def _gpu_memory_snapshot() -> dict[str, float | int | str]:
     }
 
 def load_face_detector():
+    """Load and cache the YOLO face detector used by the face pipeline."""
     global DETECTOR_MODEL
     if DETECTOR_MODEL is not None:
         return DETECTOR_MODEL
@@ -48,9 +50,11 @@ def detect_faces(
     min_box_size: int = FACE_MIN_BOX_SIZE,
     confidence_threshold: float = FACE_DETECTION_CONFIDENCE_THRESHOLD,
 ):
-    """
-    takes in a list of image paths
-    returns a dict mapping each image path to a list of bounding boxes (if any)
+    """Run YOLO face detection and return filtered boxes keyed by image path.
+
+    Detection uses the configured confidence threshold, then applies a second
+    size filter so tiny boxes do not enter the face embedding pipeline. Images
+    without any surviving boxes are omitted from the returned mapping.
     """
     if min_box_size < 0:
         raise ValueError("min_box_size must be greater than or equal to 0")
@@ -93,6 +97,7 @@ def detect_faces(
     return path_2_boxes
 
 def crop_faces(path_2_boxes)-> dict[Path, list[Image.Image]]:
+    """Crop detected face boxes into PIL images while preserving source paths."""
     path_2_crops = {}
     for image_path, boxes in path_2_boxes.items():
         image = Image.open(image_path)

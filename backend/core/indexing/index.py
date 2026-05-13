@@ -26,6 +26,7 @@ def _log_indexing(message: str, **fields) -> None:
 
 
 def _gpu_memory_snapshot() -> dict[str, float | int | str]:
+    """Return lightweight CUDA memory counters for progress logging."""
     if not torch.cuda.is_available():
         return {"cuda": "unavailable"}
 
@@ -41,6 +42,7 @@ def _dedupe_unindexed_paths(
     valid_paths: list[Path],
     path_2_created_at: dict[Path, str | None],
 ) -> tuple[list[Path], dict[Path, str | None], list[dict]]:
+    """Remove images already present in metadata and report the skipped paths."""
     image_meta_data = load_image_meta_data()
     seen_keys = {
         canonicalize_path_key(entry.get("image_path"))
@@ -65,6 +67,7 @@ def _dedupe_unindexed_paths(
 
 
 def _chunk_paths(paths: Sequence[Path], batch_size: int) -> list[list[Path]]:
+    """Split paths into fixed-size batches for incremental indexing."""
     if batch_size <= 0:
         raise ValueError("batch_size must be greater than 0")
     return [list(paths[start : start + batch_size]) for start in range(0, len(paths), batch_size)]
@@ -78,6 +81,13 @@ def index_batch(
     save_after_batch: bool = False,
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict:
+    """Run the full indexing workflow for one batch of images.
+
+    The method prepares paths once, skips images already present in metadata,
+    loads the image model and optional face models, writes image embeddings
+    first, then runs the face pipeline. The optional cancel check is evaluated
+    between expensive stages so background indexing can stop cleanly.
+    """
     normalized_paths = coerce_image_paths(image_paths)
     _log_indexing("index_batch started", input_count=len(normalized_paths), batch_size=batch_size, save_after_batch=save_after_batch)
     valid_paths, failed_items, path_2_created_at = prepare_images(normalized_paths)
@@ -219,6 +229,12 @@ def index_folder(
     recursive: bool = True,
     save_after_batch: bool = False,
 ) -> dict:
+    """Index every image discovered under a folder.
+
+    Files are discovered first, split into batches, then passed through
+    index_batch. Batch summaries are accumulated into folder-level progress
+    stats, and face clusters are finalized once all batches have been processed.
+    """
     folder = Path(folder_path)
     if not folder.exists():
         raise FileNotFoundError(f"Folder does not exist: {folder}")

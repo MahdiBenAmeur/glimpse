@@ -15,6 +15,13 @@ def index_image_batch(
     validate_inputs: bool = True,
     path_2_created_at: dict[Path, str | None] | None = None,
 ) -> dict:
+    """Embed valid images and append them to the image vector store.
+
+    When validate_inputs is false the caller is expected to have already run
+    image preparation, so this function can reuse created_at metadata without
+    re-opening every file. New ids come from store metadata, then embeddings and
+    image path records are written together.
+    """
     if validate_inputs:
         valid_paths, failed_items, prepared_created_at = prepare_images(image_paths)
         path_2_created_at = prepared_created_at

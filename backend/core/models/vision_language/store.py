@@ -12,10 +12,12 @@ image_meta_data = None
 
 
 def get_loaded_image_metadata() -> dict | None:
+    """Return in-memory image metadata when the image store is loaded."""
     return image_meta_data
 
 
 def reset_image_vector_store() -> None:
+    """Clear the in-memory image vector store so it reloads from disk next time."""
     global image_vs
     global image_meta_data
     image_vs = None
@@ -23,6 +25,7 @@ def reset_image_vector_store() -> None:
 
 
 def _ensure_image_store_metadata(meta_data: dict, image_model: BaseEmbeddingModel, emb_dim: int) -> None:
+    """Validate or initialize model checkpoint and embedding dimension metadata."""
     model_ckpt = getattr(image_model, "CKPT", image_model.__class__.__name__)
 
     if "_embedding_dim" not in meta_data:
@@ -41,6 +44,7 @@ def _ensure_image_store_metadata(meta_data: dict, image_model: BaseEmbeddingMode
 
 
 def load_image_vector_store(emb_dim: int | None = None, image_model: BaseEmbeddingModel | None = None) -> tuple[faiss.Index, dict]:
+    """Load the cached image vector store, creating it when no saved store exists."""
     global image_vs
     global image_meta_data
 
@@ -59,12 +63,20 @@ def load_image_vector_store(emb_dim: int | None = None, image_model: BaseEmbeddi
 
 
 def save_image_vector_store() -> None:
+    """Persist the loaded image vector store and metadata to disk."""
     if image_vs is None or image_meta_data is None:
         return
     save_vs(image_vs, image_meta_data, IMAGE_VS_PATH)
 
 
 def purge_image_entries(match_image_path: Callable[[str], bool]) -> dict[str, Any]:
+    """Remove image vectors whose paths match a predicate and rebuild the index.
+
+    Reserved metadata keys are preserved, matching image ids are dropped, and
+    the FAISS index is reconstructed from the vectors that remain. If every
+    image is removed, the persisted vector store is deleted instead of keeping
+    an empty file pair around.
+    """
     global image_vs
     global image_meta_data
 

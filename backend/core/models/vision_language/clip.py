@@ -16,6 +16,7 @@ class ClipEmbeddingModel(BaseEmbeddingModel):
     model_class = CLIPModel
 
     def embed_images(self, images: Sequence[str | Path | Image.Image]) -> torch.Tensor:
+        """Encode images with CLIP and return normalized image embeddings."""
         self._validate_images(images)
 
         processor, model = self.load_model()
@@ -29,6 +30,7 @@ class ClipEmbeddingModel(BaseEmbeddingModel):
         return self._normalize_embeddings(_coerce_clip_features(image_features))
 
     def embed_texts(self, texts: Sequence[str]) -> torch.Tensor:
+        """Encode texts with CLIP and return normalized text embeddings."""
         self._validate_texts(texts)
 
         processor, model = self.load_model()
@@ -47,6 +49,7 @@ class ClipEmbeddingModel(BaseEmbeddingModel):
 
 
 def _coerce_clip_features(output) -> torch.Tensor:
+    """Extract an embedding tensor from supported CLIP output shapes."""
     if isinstance(output, torch.Tensor):
         return output
 

@@ -16,6 +16,7 @@ class SiglipEmbeddingModel(BaseEmbeddingModel):
     model_class = AutoModel
 
     def embed_images(self, images: Sequence[str | Path | Image.Image]) -> torch.Tensor:
+        """Encode images with SigLIP and return normalized image embeddings."""
         self._validate_images(images)
 
         processor, model = self.load_model()
@@ -29,6 +30,7 @@ class SiglipEmbeddingModel(BaseEmbeddingModel):
         return self._normalize_embeddings(_coerce_siglip_features(image_features))
 
     def embed_texts(self, texts: Sequence[str]) -> torch.Tensor:
+        """Encode texts with SigLIP and return normalized text embeddings."""
         self._validate_texts(texts)
 
         processor, model = self.load_model()
@@ -51,6 +53,7 @@ class SiglipLargeEmbeddingModel(SiglipEmbeddingModel):
 
 
 def _coerce_siglip_features(output) -> torch.Tensor:
+    """Extract an embedding tensor from supported SigLIP output shapes."""
     if isinstance(output, torch.Tensor):
         return output
 

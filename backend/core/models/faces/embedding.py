@@ -19,6 +19,7 @@ def _log_face_embedding(message: str, **fields) -> None:
 
 
 def _gpu_memory_snapshot() -> dict[str, float | int | str]:
+    """Return lightweight CUDA memory counters for embedding logs."""
     if not torch.cuda.is_available():
         return {"cuda": "unavailable"}
 
@@ -31,6 +32,7 @@ def _gpu_memory_snapshot() -> dict[str, float | int | str]:
 
 
 def load_face_embedding_model():
+    """Load and cache the face embedding model on the configured device."""
     global FACE_EMBEDDING_MODEL
     if FACE_EMBEDDING_MODEL is not None:
         return FACE_EMBEDDING_MODEL
@@ -47,6 +49,12 @@ def load_face_embedding_model():
 
 
 def embed_faces(path_2_crops: dict[Path, list[Image.Image]], batch_size: int = 32) -> dict[Path, torch.Tensor]:
+    """Convert face crops into normalized embedding tensors grouped by image path.
+
+    Crops are flattened so the model can process them in efficient batches, but
+    their source paths are kept in parallel. After inference the embeddings are
+    L2-normalized on CPU and regrouped into one tensor per original image.
+    """
     if batch_size <= 0:
         raise ValueError("batch_size must be greater than 0")
 

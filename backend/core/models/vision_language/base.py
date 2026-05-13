@@ -12,6 +12,8 @@ from backend.config import device, models_cache_dir
 
 
 class BaseEmbeddingModel:
+    """Shared lifecycle and preprocessing helpers for image-text embedding models."""
+
     CKPT = ""
     processor_class = None
     model_class = None
@@ -23,30 +25,35 @@ class BaseEmbeddingModel:
         self._model = None
 
     def _get_processor_kwargs(self, *, local_files_only: bool) -> dict:
+        """Build Hugging Face processor loading options for cache-aware loading."""
         kwargs = {"cache_dir": models_cache_dir, **self.processor_load_kwargs}
         if local_files_only:
             kwargs["local_files_only"] = True
         return kwargs
 
     def _get_model_kwargs(self, *, local_files_only: bool) -> dict:
+        """Build Hugging Face model loading options for cache-aware loading."""
         kwargs = {"cache_dir": models_cache_dir, **self.model_load_kwargs}
         if local_files_only:
             kwargs["local_files_only"] = True
         return kwargs
 
     def _load_processor(self, *, local_files_only: bool):
+        """Instantiate the configured processor from the model checkpoint."""
         return self.processor_class.from_pretrained(
             self.CKPT,
             **self._get_processor_kwargs(local_files_only=local_files_only),
         )
 
     def _load_model(self, *, local_files_only: bool):
+        """Instantiate the configured model from the model checkpoint."""
         return self.model_class.from_pretrained(
             self.CKPT,
             **self._get_model_kwargs(local_files_only=local_files_only),
         )
 
     def is_model_downloaded(self) -> bool:
+        """Check whether the checkpoint is available in the local Hugging Face cache."""
         if self._processor is not None and self._model is not None:
             return True
 
@@ -62,6 +69,7 @@ class BaseEmbeddingModel:
             return False
 
     def download_model(self) -> Path:
+        """Download processor and model files into the configured model cache."""
         if self.is_model_downloaded():
             print("Model already downloaded.", flush=True)
             return Path(models_cache_dir)
@@ -75,6 +83,7 @@ class BaseEmbeddingModel:
         return Path(models_cache_dir)
 
     def delete_model(self) -> Path:
+        """Unload and remove this checkpoint's cached model directory."""
         repo_cache_dir = Path(models_cache_dir) / f"models--{self.CKPT.replace('/', '--')}"
         self.unload_model()
         if repo_cache_dir.exists():
@@ -82,6 +91,7 @@ class BaseEmbeddingModel:
         return repo_cache_dir
 
     def load_model(self):
+        """Load processor and model into memory, downloading them first if needed."""
         if self._processor is not None and self._model is not None:
             return self._processor, self._model
 
@@ -94,17 +104,20 @@ class BaseEmbeddingModel:
         return self._processor, self._model
 
     def unload_model(self) -> None:
+        """Release cached model objects and clear CUDA cache when available."""
         self._processor = None
         self._model = None
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
     def _normalize_embeddings(self, embeddings: torch.Tensor) -> torch.Tensor:
+        """Return L2-normalized float32 embeddings on CPU for vector search."""
         embeddings = embeddings.to(torch.float32)
         embeddings = embeddings / embeddings.norm(dim=-1, keepdim=True).clamp_min(1e-12)
         return embeddings.detach().cpu()
 
     def _move_inputs_to_device(self, inputs):
+        """Move tensors inside processor outputs to the configured compute device."""
         if hasattr(inputs, "to"):
             return inputs.to(device)
         if isinstance(inputs, dict):
@@ -115,6 +128,7 @@ class BaseEmbeddingModel:
         return inputs.to(device) if isinstance(inputs, torch.Tensor) else inputs
 
     def _to_pil_image(self, image: str | Path | Image.Image) -> Image.Image:
+        """Load a path-like image or normalize an existing PIL image to RGB."""
         if isinstance(image, Image.Image):
             return image.convert("RGB")
         return load_image(str(image)).convert("RGB")
@@ -130,12 +144,14 @@ class BaseEmbeddingModel:
             raise ValueError("texts must not contain empty strings")
 
     def embed_images(self, images: Sequence[str | Path | Image.Image]) -> torch.Tensor:
+        """Embed a batch of images into the shared vector space."""
         raise NotImplementedError
 
     def embed_image(self, image: str | Path | Image.Image) -> torch.Tensor:
         return self.embed_images([image])[0]
 
     def embed_texts(self, texts: Sequence[str]) -> torch.Tensor:
+        """Embed a batch of text queries into the shared vector space."""
         raise NotImplementedError
 
     def embed_text(self, text: str) -> torch.Tensor:
