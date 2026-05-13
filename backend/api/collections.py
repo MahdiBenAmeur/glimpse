@@ -25,6 +25,9 @@ class CollectionSummaryResponse(BaseModel):
 
 
 def _build_collection_response(collection, request: Request) -> dict:
+    """
+    Formats a collection record into a summary response with preview URLs.
+    """
     image_ids = get_collection_image_ids(int(collection.id))
     preview_urls = [
         f"/api/search/images/{image_id}/thumbnail"
@@ -43,6 +46,9 @@ def _build_collection_response(collection, request: Request) -> dict:
 
 
 def _sync_collection_metadata(session: Session, collection_id: int):
+    """
+    Updates the image count and modification date for a collection.
+    """
     collection = CollectionService.get(session=session, collection_id=collection_id)
     if collection is None:
         return None
@@ -55,15 +61,24 @@ def _sync_collection_metadata(session: Session, collection_id: int):
 
 @router.post("/", response_model=CollectionRead)
 def create_collection(collection_in: CollectionCreate, session: Session = Depends(get_session)):
+    """
+    Creates a new image collection.
+    """
     return CollectionService.create(session=session, collection_in=collection_in)
 
 @router.get("/", response_model=List[CollectionSummaryResponse])
 def read_collections(request: Request, skip: int = 0, limit: int = 100, session: Session = Depends(get_session)):
+    """
+    Retrieves a list of all image collections with summary details.
+    """
     collections = CollectionService.get_all(session=session, skip=skip, limit=limit)
     return [_build_collection_response(collection, request) for collection in collections]
 
 @router.get("/{collection_id}", response_model=CollectionSummaryResponse)
 def read_collection(collection_id: int, request: Request, session: Session = Depends(get_session)):
+    """
+    Retrieves detailed information for a specific collection.
+    """
     collection = CollectionService.get(session=session, collection_id=collection_id)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -71,6 +86,9 @@ def read_collection(collection_id: int, request: Request, session: Session = Dep
 
 @router.patch("/{collection_id}", response_model=CollectionRead)
 def update_collection(collection_id: int, collection_in: CollectionUpdate, session: Session = Depends(get_session)):
+    """
+    Updates the metadata of an existing collection.
+    """
     collection = CollectionService.update(session=session, collection_id=collection_id, collection_in=collection_in)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -78,6 +96,9 @@ def update_collection(collection_id: int, collection_in: CollectionUpdate, sessi
 
 @router.delete("/{collection_id}")
 def delete_collection(collection_id: int, session: Session = Depends(get_session)):
+    """
+    Removes a collection and clears its associated image mappings.
+    """
     success = CollectionService.delete(session=session, collection_id=collection_id)
     if not success:
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -87,6 +108,9 @@ def delete_collection(collection_id: int, session: Session = Depends(get_session
 
 @router.get("/{collection_id}/images")
 def read_collection_images(collection_id: int, request: Request):
+    """
+    Lists all images belonging to a specific collection.
+    """
     image_ids = get_collection_image_ids(collection_id)
     items = []
     for image_id in image_ids:
@@ -119,6 +143,9 @@ def read_collection_images(collection_id: int, request: Request):
 
 @router.post("/{collection_id}/images")
 def add_collection_images(collection_id: int, payload: dict, session: Session = Depends(get_session)):
+    """
+    Adds existing images to a collection.
+    """
     if CollectionService.get(session=session, collection_id=collection_id) is None:
         raise HTTPException(status_code=404, detail="Collection not found")
     image_ids = [int(image_id) for image_id in payload.get("imageIds", [])]
@@ -130,6 +157,9 @@ def add_collection_images(collection_id: int, payload: dict, session: Session = 
 
 @router.post("/{collection_id}/pick-images")
 def pick_collection_images(collection_id: int, session: Session = Depends(get_session)):
+    """
+    Opens a file picker to select images and adds them to a collection.
+    """
     collection = CollectionService.get(session=session, collection_id=collection_id)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -180,6 +210,9 @@ def pick_collection_images(collection_id: int, session: Session = Depends(get_se
 
 @router.delete("/{collection_id}/images/{image_id}")
 def delete_collection_image(collection_id: int, image_id: int, session: Session = Depends(get_session)):
+    """
+    Removes a specific image from a collection.
+    """
     if CollectionService.get(session=session, collection_id=collection_id) is None:
         raise HTTPException(status_code=404, detail="Collection not found")
     remove_image_from_collection(image_id, collection_id)

@@ -15,6 +15,9 @@ DEFAULT_THUMBNAIL_SIZE = 512
 
 
 def get_image_dimensions(image_path: str | Path) -> tuple[int | None, int | None]:
+    """
+    Returns the width and height of an image.
+    """
     try:
         with Image.open(image_path) as image:
             return image.width, image.height
@@ -23,6 +26,9 @@ def get_image_dimensions(image_path: str | Path) -> tuple[int | None, int | None
 
 
 def get_image_taken_at(image_path: str | Path, preferred: str | None = None) -> str | None:
+    """
+    Extracts the creation date from EXIF data or file modification time.
+    """
     if preferred is not None and str(preferred).strip():
         return str(preferred)
 
@@ -48,6 +54,9 @@ def get_image_taken_at(image_path: str | Path, preferred: str | None = None) -> 
 
 
 def ensure_thumbnail(image_path: str | Path, *, size: int = DEFAULT_THUMBNAIL_SIZE) -> Path:
+    """
+    Generates or retrieves a cached thumbnail for an image.
+    """
     source_path = Path(canonicalize_path(image_path))
     if not source_path.exists() or not source_path.is_file():
         raise FileNotFoundError(f"Image file is missing: {source_path}")
@@ -68,6 +77,9 @@ def ensure_thumbnail(image_path: str | Path, *, size: int = DEFAULT_THUMBNAIL_SI
 
 
 def clear_thumbnail_cache() -> None:
+    """
+    Deletes all cached thumbnail files.
+    """
     if THUMBNAIL_CACHE_DIR.exists():
         shutil.rmtree(THUMBNAIL_CACHE_DIR)
     THUMBNAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)

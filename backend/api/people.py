@@ -27,6 +27,9 @@ class PersonMergeRequest(BaseModel):
 
 
 def _log_people_api(message: str, **fields: Any) -> None:
+    """
+    Logs API activity related to people management.
+    """
     timestamp = datetime.utcnow().isoformat(timespec="seconds")
     thread = threading.current_thread()
     payload = {
@@ -41,6 +44,9 @@ def _log_people_api(message: str, **fields: Any) -> None:
 
 
 def _build_person_response(person_id: int, entry: dict[str, Any], request: Request) -> dict[str, Any]:
+    """
+    Formats a person's metadata for the API response.
+    """
     image_paths = entry.get("image_paths", [])
     image_created_ats = [value for value in entry.get("image_created_ats", []) if value]
     last_seen = max(image_created_ats) if image_created_ats else None
@@ -54,10 +60,16 @@ def _build_person_response(person_id: int, entry: dict[str, Any], request: Reque
 
 @router.post("/", response_model=PersonRead)
 def create_person(person_in: PersonCreate, session: Session = Depends(get_session)):
+    """
+    Creates a new person record.
+    """
     return PersonService.create(session=session, person_in=person_in)
 
 @router.get("/")
 def read_people(request: Request, skip: int = 0, limit: int | None = None):
+    """
+    Lists all detected people from the face vector store.
+    """
     _log_people_api(
         "read_people called",
         skip=skip,
@@ -74,8 +86,6 @@ def read_people(request: Request, skip: int = 0, limit: int | None = None):
         if str(key).startswith("_") or not isinstance(entry, dict):
             continue
         people.append(_build_person_response(int(key), entry, request))
-    # Keep named people first so renaming a person makes them easier to find,
-    # and avoid silently dropping them behind a low default page size.
     people.sort(
         key=lambda item: (
             0 if item["name"] else 1,
@@ -88,6 +98,9 @@ def read_people(request: Request, skip: int = 0, limit: int | None = None):
 
 @router.get("/{person_id}")
 def read_person(person_id: int, request: Request):
+    """
+    Retrieves details for a specific person.
+    """
     _log_people_api("read_person called", person_id=person_id, path=str(request.url.path))
     _, person_meta_data = load_person_vector_store()
     entry = person_meta_data.get(str(person_id))
@@ -102,6 +115,9 @@ def read_person_images(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
 ):
+    """
+    Lists all images where a specific person's face was detected.
+    """
     _log_people_api("read_person_images called", person_id=person_id, path=str(request.url.path), skip=skip, limit=limit)
     _, person_meta_data = load_person_vector_store()
     entry = person_meta_data.get(str(person_id))
@@ -163,6 +179,9 @@ def read_person_images(
 
 @router.get("/{person_id}/face", name="read_person_face")
 def read_person_face(person_id: int):
+    """
+    Generates a cropped JPEG of a person's best face detection.
+    """
     _log_people_api("read_person_face called", person_id=person_id)
     _, person_meta_data = load_person_vector_store()
     entry = person_meta_data.get(str(person_id))
@@ -202,6 +221,9 @@ def read_person_face(person_id: int):
 
 @router.patch("/{person_id}")
 def update_person(person_id: int, person_in: PersonUpdate):
+    """
+    Updates person information (e.g., name).
+    """
     _log_people_api("update_person called", person_id=person_id)
     _, person_meta_data = load_person_vector_store()
     entry = person_meta_data.get(str(person_id))
@@ -219,6 +241,9 @@ def update_person(person_id: int, person_in: PersonUpdate):
 
 @router.post("/{person_id}/merge")
 def merge_person(person_id: int, payload: PersonMergeRequest):
+    """
+    Merges two person identities into one.
+    """
     _log_people_api("merge_person called", target_person_id=person_id, source_person_id=payload.source_person_id)
     try:
         return merge_people(person_id, payload.source_person_id)
@@ -230,6 +255,9 @@ def merge_person(person_id: int, payload: PersonMergeRequest):
 
 @router.delete("/{person_id}")
 def delete_person(person_id: int, session: Session = Depends(get_session)):
+    """
+    Removes a person record.
+    """
     success = PersonService.delete(session=session, person_id=person_id)
     if not success:
         raise HTTPException(status_code=404, detail="Person not found")

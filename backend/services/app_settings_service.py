@@ -19,10 +19,16 @@ DEFAULT_APP_SETTINGS: dict[str, Any] = {
 
 
 def get_default_app_settings() -> dict[str, Any]:
+    """
+    Returns the default application settings.
+    """
     return dict(DEFAULT_APP_SETTINGS)
 
 
 def load_app_settings() -> dict[str, Any]:
+    """
+    Loads application settings from disk.
+    """
     if not APP_SETTINGS_PATH.exists():
         return get_default_app_settings()
     try:
@@ -44,6 +50,9 @@ def load_app_settings() -> dict[str, Any]:
 
 
 def save_app_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    """
+    Saves application settings to disk.
+    """
     merged = get_default_app_settings()
     merged.update({
         key: value
@@ -57,6 +66,9 @@ def save_app_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
 
 def update_app_settings(changes: dict[str, Any]) -> dict[str, Any]:
+    """
+    Updates application settings.
+    """
     settings = load_app_settings()
     settings.update({
         key: value

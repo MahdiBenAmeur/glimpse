@@ -8,6 +8,9 @@ from backend.config import SAVED_SEARCHES_PATH
 class SavedSearchService:
     @staticmethod
     def _read_data() -> List[dict]:
+        """
+        Reads saved searches from disk.
+        """
         if not SAVED_SEARCHES_PATH.exists():
             return []
         try:
@@ -18,6 +21,9 @@ class SavedSearchService:
 
     @staticmethod
     def _write_data(data: List[dict]):
+        """
+        Writes saved searches to disk.
+        """
         SAVED_SEARCHES_PATH.parent.mkdir(parents=True, exist_ok=True)
         with SAVED_SEARCHES_PATH.open("w", encoding="utf-8") as f:
             # We use default=str so datetime gets serialized correctly
@@ -25,6 +31,9 @@ class SavedSearchService:
 
     @staticmethod
     def create(search_in: SavedSearchCreate) -> SavedSearchRead:
+        """
+        Saves a new search query.
+        """
         data = SavedSearchService._read_data()
         
         search_id = str(uuid.uuid4())
@@ -42,6 +51,9 @@ class SavedSearchService:
 
     @staticmethod
     def get(search_id: str) -> Optional[SavedSearchRead]:
+        """
+        Retrieves a saved search by ID.
+        """
         data = SavedSearchService._read_data()
         for item in data:
             if item.get("id") == search_id:
@@ -50,12 +62,18 @@ class SavedSearchService:
 
     @staticmethod
     def get_all(skip: int = 0, limit: int = 100) -> List[SavedSearchRead]:
+        """
+        Lists all saved searches.
+        """
         data = SavedSearchService._read_data()
         paginated_data = data[skip : skip + limit]
         return [SavedSearchRead(**item) for item in paginated_data]
 
     @staticmethod
     def update(search_id: str, search_in: SavedSearchUpdate) -> Optional[SavedSearchRead]:
+        """
+        Updates a saved search.
+        """
         data = SavedSearchService._read_data()
         for i, item in enumerate(data):
             if item.get("id") == search_id:
@@ -70,6 +88,9 @@ class SavedSearchService:
 
     @staticmethod
     def delete(search_id: str) -> bool:
+        """
+        Removes a saved search.
+        """
         data = SavedSearchService._read_data()
         initial_length = len(data)
         

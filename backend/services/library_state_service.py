@@ -9,6 +9,9 @@ from backend.utils.path_utils import canonicalize_path, canonicalize_path_key
 
 
 def load_image_meta_data() -> dict[str, Any]:
+    """
+    Loads image metadata from disk.
+    """
     loaded_meta = get_loaded_image_metadata()
     if isinstance(loaded_meta, dict) and loaded_meta:
         return loaded_meta
@@ -23,6 +26,9 @@ def load_image_meta_data() -> dict[str, Any]:
 
 
 def list_indexed_images() -> list[dict[str, Any]]:
+    """
+    Lists all indexed images.
+    """
     meta_data = load_image_meta_data()
     items: list[dict[str, Any]] = []
     for key, value in meta_data.items():
@@ -43,6 +49,9 @@ def list_indexed_images() -> list[dict[str, Any]]:
 
 
 def get_indexed_image(image_id: int) -> dict[str, Any] | None:
+    """
+    Retrieves metadata for a specific indexed image.
+    """
     image_entry = load_image_meta_data().get(str(image_id))
     if not isinstance(image_entry, dict):
         return None
@@ -57,6 +66,9 @@ def get_indexed_image(image_id: int) -> dict[str, Any] | None:
 
 
 def find_image_id_by_path(image_path: str | Path) -> int | None:
+    """
+    Finds an image ID by its file path.
+    """
     resolved_key = canonicalize_path_key(image_path)
     for item in list_indexed_images():
         if canonicalize_path_key(item["image_path"]) == resolved_key:
@@ -65,10 +77,16 @@ def find_image_id_by_path(image_path: str | Path) -> int | None:
 
 
 def _default_state() -> dict[str, Any]:
+    """
+    Returns the default library state.
+    """
     return {"images": {}}
 
 
 def load_library_state() -> dict[str, Any]:
+    """
+    Loads the library state from disk.
+    """
     if not LIBRARY_STATE_PATH.exists():
         return _default_state()
     try:
@@ -83,17 +101,26 @@ def load_library_state() -> dict[str, Any]:
 
 
 def save_library_state(state: dict[str, Any]) -> None:
+    """
+    Saves the library state to disk.
+    """
     LIBRARY_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with LIBRARY_STATE_PATH.open("w", encoding="utf-8") as handle:
         json.dump(state, handle, indent=2)
 
 
 def get_image_state(image_id: int) -> dict[str, Any]:
+    """
+    Retrieves the state for a specific image.
+    """
     state = load_library_state()
     return state.get("images", {}).get(str(image_id), {})
 
 
 def update_image_state(image_id: int, *, is_favorite: bool | None = None, collection_ids: list[int] | None = None) -> dict[str, Any]:
+    """
+    Updates the state for a specific image.
+    """
     state = load_library_state()
     image_states = state.setdefault("images", {})
     current = dict(image_states.get(str(image_id), {}))
@@ -110,25 +137,40 @@ def update_image_state(image_id: int, *, is_favorite: bool | None = None, collec
 
 
 def set_image_favorite(image_id: int, is_favorite: bool) -> dict[str, Any]:
+    """
+    Sets the favorite status of an image.
+    """
     return update_image_state(image_id, is_favorite=is_favorite)
 
 
 def get_image_collection_ids(image_id: int) -> list[int]:
+    """
+    Retrieves the collection IDs for an image.
+    """
     return [int(collection_id) for collection_id in get_image_state(image_id).get("collection_ids", [])]
 
 
 def add_image_to_collection(image_id: int, collection_id: int) -> dict[str, Any]:
+    """
+    Adds an image to a collection.
+    """
     collection_ids = set(get_image_collection_ids(image_id))
     collection_ids.add(int(collection_id))
     return update_image_state(image_id, collection_ids=sorted(collection_ids))
 
 
 def remove_image_from_collection(image_id: int, collection_id: int) -> dict[str, Any]:
+    """
+    Removes an image from a collection.
+    """
     collection_ids = [cid for cid in get_image_collection_ids(image_id) if cid != int(collection_id)]
     return update_image_state(image_id, collection_ids=collection_ids)
 
 
 def get_collection_image_ids(collection_id: int) -> list[int]:
+    """
+    Retrieves all image IDs in a collection.
+    """
     state = load_library_state()
     result: list[int] = []
     for image_id, image_state in state.get("images", {}).items():
@@ -138,6 +180,9 @@ def get_collection_image_ids(collection_id: int) -> list[int]:
 
 
 def clear_collection(collection_id: int) -> None:
+    """
+    Removes all images from a collection.
+    """
     state = load_library_state()
     updated = False
     for image_state in state.get("images", {}).values():
@@ -151,6 +196,9 @@ def clear_collection(collection_id: int) -> None:
 
 
 def remove_image_states(image_ids: list[int]) -> int:
+    """
+    Removes the state records for multiple images.
+    """
     if not image_ids:
         return 0
 

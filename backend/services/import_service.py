@@ -10,6 +10,9 @@ from backend.utils.image_processing import IMAGE_SUFFIXES
 
 
 def _open_dialog(callback):
+    """
+    Wraps a tkinter dialog to ensure it is focused and cleaned up.
+    """
     root = Tk()
     root.withdraw()
     root.attributes("-topmost", True)
@@ -20,6 +23,9 @@ def _open_dialog(callback):
 
 
 def pick_folder_path() -> str | None:
+    """
+    Opens a folder picker dialog.
+    """
     try:
         selected = _open_dialog(lambda: filedialog.askdirectory(mustexist=True))
     except Exception as exc:  # pragma: no cover - depends on desktop environment
@@ -28,6 +34,9 @@ def pick_folder_path() -> str | None:
 
 
 def pick_image_paths() -> list[str]:
+    """
+    Opens a file picker dialog for images.
+    """
     file_types = [
         ("Image files", " ".join(f"*{suffix}" for suffix in sorted(IMAGE_SUFFIXES) if suffix)),
         ("All files", "*.*"),
@@ -45,6 +54,9 @@ def pick_image_paths() -> list[str]:
 
 
 def import_image_files(image_paths: list[str | Path]) -> dict[str, object]:
+    """
+    Copies selected images into the application's library.
+    """
     normalized_paths = [Path(path).expanduser().resolve() for path in image_paths]
     existing_files = [path for path in normalized_paths if path.exists() and path.is_file()]
     if not existing_files:
