@@ -118,25 +118,6 @@ If this is the first time you use the app, you will also need to download and ac
 8. Image-to-image search embeds the query image with the same active model and searches the image store directly. Face-photo search embeds detected query faces and matches them against the face store, then folds those matches back into image results.
 9. The API enriches final results with thumbnail URLs, dimensions, display dates, favorites, collections, and people labels before returning them to the frontend.
 
-## Data and storage
-
-Glimpse keeps most runtime data locally:
-
-- `SQLITE_DB_PATH`: SQLite database for app records such as indexed folders, collections, and saved structured entities managed through the API layer
-- `IMAGE_VS_PATH`: image FAISS index plus `meta_data.json` for image ids, image paths, created-at values, and reserved store metadata such as embedding dimension and checkpoint id
-- `FACE_VS_PATH`: face FAISS index plus `meta_data.json` for per-face records such as source image path, face box, detection confidence, quality score, and assigned person id
-- `PERSON_VS_PATH`: person centroid FAISS index plus clustered person metadata such as centroid, image paths, face boxes, quality scores, face ids, names, and top exemplar faces
-- `MODELS_CACHE_DIR`: downloaded Hugging Face and timm model files used by the image, detector, and face embedding models
-- `THUMBNAIL_CACHE_DIR`: generated JPEG thumbnails for indexed images
-- `LIBRARY_STATE_PATH`: lightweight per-image UI state such as favorites and collection membership
-- `MODEL_STATE_PATH`: currently selected image embedding model id
-- `APP_SETTINGS_PATH`: persisted app settings such as face detection and UI preferences
-- `SAVED_SEARCHES_PATH`: saved search definitions
-- `IMPORTED_LIBRARY_ROOT`: files imported into the app-managed local library
-- `FACE_QUERY_UPLOAD_DIR`: temporary uploaded face-photo search files
-
-
-
 
 ### Desktop shell and scripts
 
