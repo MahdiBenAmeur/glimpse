@@ -108,33 +108,38 @@ If this is the first time you use the app, you will also need to download and ac
 
 ## How the pipeline works
 
-1. You choose an embedding model and add one or more folders, or import images into the app-managed library.
-2. The index job scans those folders, filters to supported image files, validates them, and extracts a creation date from EXIF or filesystem metadata.
-3. The active vision-language model generates normalized embeddings for each image and stores them in the image FAISS vector store.
-4. A face detector finds faces in each image, a face embedding model converts crops into embeddings, and the app assigns those faces to existing people clusters or creates new ones.
-5. Person centroids and exemplar faces are updated, then duplicate people clusters are merged when similarity thresholds are met.
-6. Vector stores and metadata are written to the configured app data directory, folder stats are updated, and thumbnails are generated on demand and cached.
-7. Search requests embed the text query, rank images from the image vector store, and then apply folder, date, face-presence, person, and optional face-photo filters.
-8. The API enriches results with thumbnails, dimensions, dates, favorites, collections, and people labels before returning them to the frontend.
+1. You choose an active image embedding model, then add folders or import files into the app-managed library.
+2. The index job scans those folders, keeps supported image paths, normalizes paths, and captures a `created_at` value from image metadata or filesystem timestamps.
+3. The active vision-language model embeds each image batch and writes the vectors to the image FAISS store. Image ids and per-image metadata such as `image_path` and `created_at` are stored alongside that index in `meta_data.json`.
+4. If face detection is enabled, the face pipeline runs on the same image batch: YOLO detects boxes, crops are embedded by the face model, and every detected face is written into the face FAISS store with its source image path, face box, confidence, and quality score.
+5. After face vectors are written, the app reclusters all indexed faces with DBSCAN to rebuild person identities. Each person record stores a centroid, the list of source image paths and face boxes, weighted quality data, and a small set of top exemplar faces for previews.
+6. The image, face, and person stores are persisted under `backend/data`, folder scan stats are updated in SQLite, and thumbnail files are generated lazily and cached the first time they are requested.
+7. Text search embeds the query with the currently active image model, searches the image FAISS store, and then applies folder, date, face-presence, person, and optional face-photo filters before paging the results.
+8. Image-to-image search embeds the query image with the same active model and searches the image store directly. Face-photo search embeds detected query faces and matches them against the face store, then folds those matches back into image results.
+9. The API enriches final results with thumbnail URLs, dimensions, display dates, favorites, collections, and people labels before returning them to the frontend.
 
 ## Data and storage
 
 Glimpse keeps most runtime data locally:
 
-- `SQLITE_DB_PATH`: SQLite database for core app records such as folders and collections
-- `IMAGE_VS_PATH`: image embeddings and image metadata
-- `FACE_VS_PATH`: face embeddings and face-level metadata
-- `PERSON_VS_PATH`: people centroids and cluster metadata
-- `MODELS_CACHE_DIR`: downloaded model files
-- `THUMBNAIL_CACHE_DIR`: generated thumbnail cache
-- `LIBRARY_STATE_PATH`: favorites and collection membership state
-- `MODEL_STATE_PATH`: active model selection
+- `SQLITE_DB_PATH`: SQLite database for app records such as indexed folders, collections, and saved structured entities managed through the API layer
+- `IMAGE_VS_PATH`: image FAISS index plus `meta_data.json` for image ids, image paths, created-at values, and reserved store metadata such as embedding dimension and checkpoint id
+- `FACE_VS_PATH`: face FAISS index plus `meta_data.json` for per-face records such as source image path, face box, detection confidence, quality score, and assigned person id
+- `PERSON_VS_PATH`: person centroid FAISS index plus clustered person metadata such as centroid, image paths, face boxes, quality scores, face ids, names, and top exemplar faces
+- `MODELS_CACHE_DIR`: downloaded Hugging Face and timm model files used by the image, detector, and face embedding models
+- `THUMBNAIL_CACHE_DIR`: generated JPEG thumbnails for indexed images
+- `LIBRARY_STATE_PATH`: lightweight per-image UI state such as favorites and collection membership
+- `MODEL_STATE_PATH`: currently selected image embedding model id
+- `APP_SETTINGS_PATH`: persisted app settings such as face detection and UI preferences
 - `SAVED_SEARCHES_PATH`: saved search definitions
+- `IMPORTED_LIBRARY_ROOT`: files imported into the app-managed local library
+- `FACE_QUERY_UPLOAD_DIR`: temporary uploaded face-photo search files
+
+
 
 
 ### Desktop shell and scripts
 
-- `electron/main.js`: starts Python, waits for backend health, starts Vite, then creates the Electron window
 - `scripts/reset_library_data.py`: clears index, SQLite, and state files while preserving downloaded models
 
 ## Development notes
