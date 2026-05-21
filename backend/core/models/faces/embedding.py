@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from PIL import Image
 from timm.data import create_transform, resolve_data_config
 
-from backend.config import FACE_EMBEDDING_MODEL, device, models_cache_dir
+from backend.config import FACE_EMBEDDING_MODEL, FACE_EMBEDDING_MODEL_ID, DEVICE, MODELS_CACHE_DIR
 
 
 def _log_face_embedding(message: str, **fields) -> None:
@@ -37,12 +37,13 @@ def load_face_embedding_model():
     if FACE_EMBEDDING_MODEL is not None:
         return FACE_EMBEDDING_MODEL
 
-    model_id = "gaunernst/vit_small_patch8_gap_112.cosface_ms1mv3"
+    model_id = FACE_EMBEDDING_MODEL_ID
     model = timm.create_model(
         f"hf_hub:{model_id}",
         pretrained=True,
-        cache_dir=models_cache_dir,
-    ).to(device)
+        cache_dir=MODELS_CACHE_DIR,
+
+    ).to(DEVICE)
     model.eval()
     FACE_EMBEDDING_MODEL = model
     return model
@@ -89,7 +90,7 @@ def embed_faces(path_2_crops: dict[Path, list[Image.Image]], batch_size: int = 3
             total_face_count=len(flat_crops),
             **_gpu_memory_snapshot(),
         )
-        batch = torch.stack(flat_crops[start : start + batch_size]).to(device)
+        batch = torch.stack(flat_crops[start : start + batch_size]).to(DEVICE)
 
         with torch.inference_mode():
             batch_embeddings = model(batch)
@@ -105,6 +106,7 @@ def embed_faces(path_2_crops: dict[Path, list[Image.Image]], batch_size: int = 3
         for image_path, embedding in zip(batch_paths, batch_embeddings):
             path_2_embeddings[image_path].append(embedding)
 
+    # stacking embeddings per path for a final shape of [num_faces, embedding_dim] or an empty tensor if no faces were detected
     for image_path, embeddings in path_2_embeddings.items():
         if embeddings:
             path_2_embeddings[image_path] = torch.stack(embeddings)

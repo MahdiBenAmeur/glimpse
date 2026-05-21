@@ -34,6 +34,7 @@ def _normalize_similarity(score: float) -> float:
 
 def _parse_created_at(value: str | None) -> datetime | None:
     """Parse common metadata date formats into a datetime for filtering."""
+    
     if value is None:
         return None
 
@@ -167,7 +168,7 @@ def _collect_face_photo_scores(face_results: list[dict]) -> dict[str, float]:
     return image_path_2_score
 
 
-def _collect_image_matches(scores: np.ndarray, ids: np.ndarray, image_meta_data: dict) -> list[dict]:
+def _collect_image_matches(scores: np.ndarray, ids: np.ndarray, image_vs_meta_data: dict) -> list[dict]:
     """Combine FAISS image search scores and ids with stored image metadata."""
     matches = []
     for score, item_id in zip(scores[0], ids[0]):
@@ -175,7 +176,7 @@ def _collect_image_matches(scores: np.ndarray, ids: np.ndarray, image_meta_data:
         if item_id < 0:
             continue
 
-        meta_entry = image_meta_data.get(str(item_id), {})
+        meta_entry = image_vs_meta_data.get(str(item_id), {})
         matches.append(
             {
                 "image_id": item_id,
@@ -216,15 +217,14 @@ def search_by_text(text: str, image_model: BaseEmbeddingModel, top_k: int = 10) 
 
     top_k = _validate_top_k(top_k)
     text_embedding = image_model.embed_text(text)
-    emb_dim = int(text_embedding.shape[-1])
-    image_vs, image_meta_data = load_image_vector_store(emb_dim, image_model)
+    image_vs, image_vs_meta_data = load_image_vector_store(image_model)
 
     if image_vs.ntotal == 0:
         return []
 
     k = min(top_k, int(image_vs.ntotal))
     scores, ids = image_vs.search(embedding_row(text_embedding), k=k)
-    return _collect_image_matches(scores, ids, image_meta_data)
+    return _collect_image_matches(scores, ids, image_vs_meta_data)
 
 
 def search_by_image(
@@ -235,15 +235,14 @@ def search_by_image(
     """Search indexed images by embedding a query image."""
     top_k = _validate_top_k(top_k)
     image_embedding = image_model.embed_image(image)
-    emb_dim = int(image_embedding.shape[-1])
-    image_vs, image_meta_data = load_image_vector_store(emb_dim, image_model)
+    image_vs, image_vs_meta_data = load_image_vector_store(image_model)
 
     if image_vs.ntotal == 0:
         return []
 
     k = min(top_k, int(image_vs.ntotal))
     scores, ids = image_vs.search(embedding_row(image_embedding), k=k)
-    return _collect_image_matches(scores, ids, image_meta_data)
+    return _collect_image_matches(scores, ids, image_vs_meta_data)
 
 
 def search_by_face(image_path: str | Path, top_k: int = 10) -> list[dict]:
@@ -346,14 +345,13 @@ def global_search(
     text_scores: np.ndarray | None = None
     image_ids: np.ndarray | None = None
     image_vs = None
-    image_meta_data: dict = {}
+    image_vs_meta_data: dict = {}
 
     if normalized_query:
         text_embedding = image_model.embed_text(normalized_query)
-        emb_dim = int(text_embedding.shape[-1])
-        image_vs, image_meta_data = load_image_vector_store(emb_dim, image_model)
+        image_vs, image_vs_meta_data = load_image_vector_store(image_model)
     else:
-        image_vs, image_meta_data = load_image_vector_store(image_model=image_model)
+        image_vs, image_vs_meta_data = load_image_vector_store(image_model)
 
     if image_vs.ntotal == 0:
         return {
@@ -374,7 +372,7 @@ def global_search(
             (0.0, image_id)
             for image_id in sorted(
                 int(key)
-                for key in image_meta_data.keys()
+                for key in image_vs_meta_data.keys()
                 if not str(key).startswith("_")
             )
         )
@@ -399,7 +397,7 @@ def global_search(
         if image_id < 0:
             continue
 
-        meta_entry = image_meta_data.get(str(image_id), {})
+        meta_entry = image_vs_meta_data.get(str(image_id), {})
         image_path = meta_entry.get("image_path")
         created_at = meta_entry.get("created_at")
         image_person_ids = image_path_2_person_ids.get(image_path, set())

@@ -12,7 +12,7 @@ from backend.core.models.faces.store import finalize_face_clusters, save_face_ve
 from backend.core.models.vision_language.base import BaseEmbeddingModel
 from backend.core.models.vision_language.store import save_image_vector_store
 from backend.services.app_settings_service import load_app_settings
-from backend.services.library_state_service import load_image_meta_data
+from backend.services.library_state_service import load_image_vs_meta_data
 from backend.utils.image_processing import coerce_image_paths, list_image_files, prepare_images
 from backend.utils.path_utils import canonicalize_path_key
 
@@ -43,10 +43,10 @@ def _dedupe_unindexed_paths(
     path_2_created_at: dict[Path, str | None],
 ) -> tuple[list[Path], dict[Path, str | None], list[dict]]:
     """Remove images already present in metadata and report the skipped paths."""
-    image_meta_data = load_image_meta_data()
+    image_vs_meta_data = load_image_vs_meta_data()
     seen_keys = {
         canonicalize_path_key(entry.get("image_path"))
-        for key, entry in image_meta_data.items()
+        for key, entry in image_vs_meta_data.items()
         if not str(key).startswith("_") and isinstance(entry, dict) and entry.get("image_path")
     }
 
@@ -225,7 +225,7 @@ def index_folder(
     folder_path: str | Path,
     image_model: BaseEmbeddingModel,
     *,
-    batch_size: int = 64,
+    batch_size: int = 32,
     recursive: bool = True,
     save_after_batch: bool = False,
 ) -> dict:

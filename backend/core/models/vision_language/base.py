@@ -8,13 +8,14 @@ from PIL import Image
 from huggingface_hub import snapshot_download
 from transformers.image_utils import load_image
 
-from backend.config import device, models_cache_dir
+from backend.config import DEVICE, MODELS_CACHE_DIR
 
 
 class BaseEmbeddingModel:
     """Shared lifecycle and preprocessing helpers for image-text embedding models."""
 
     CKPT = ""
+    embedding_dim: int | None = None
     processor_class = None
     model_class = None
     processor_load_kwargs: dict = {}
@@ -24,16 +25,24 @@ class BaseEmbeddingModel:
         self._processor = None
         self._model = None
 
+    def get_embedding_dim(self) -> int:
+        """Return the static embedding size exposed by the concrete model wrapper."""
+        if self.embedding_dim is None:
+            raise NotImplementedError(
+                f"{self.__class__.__name__} must define a static embedding_dim"
+            )
+        return int(self.embedding_dim)
+
     def _get_processor_kwargs(self, *, local_files_only: bool) -> dict:
         """Build Hugging Face processor loading options for cache-aware loading."""
-        kwargs = {"cache_dir": models_cache_dir, **self.processor_load_kwargs}
+        kwargs = {"cache_dir": MODELS_CACHE_DIR, **self.processor_load_kwargs}
         if local_files_only:
             kwargs["local_files_only"] = True
         return kwargs
 
     def _get_model_kwargs(self, *, local_files_only: bool) -> dict:
         """Build Hugging Face model loading options for cache-aware loading."""
-        kwargs = {"cache_dir": models_cache_dir, **self.model_load_kwargs}
+        kwargs = {"cache_dir": MODELS_CACHE_DIR, **self.model_load_kwargs}
         if local_files_only:
             kwargs["local_files_only"] = True
         return kwargs
@@ -60,7 +69,7 @@ class BaseEmbeddingModel:
         try:
             snapshot_download(
                 repo_id=self.CKPT,
-                cache_dir=models_cache_dir,
+                cache_dir=MODELS_CACHE_DIR,
                 local_files_only=True,
                 **({"allow_patterns": ["*.json", "*.txt", "*.model", "*.safetensors", "*.bin", "*.py"]}),
             )
@@ -72,7 +81,7 @@ class BaseEmbeddingModel:
         """Download processor and model files into the configured model cache."""
         if self.is_model_downloaded():
             print("Model already downloaded.", flush=True)
-            return Path(models_cache_dir)
+            return Path(MODELS_CACHE_DIR)
 
         print(f"Downloading model: {self.CKPT}", flush=True)
         processor = self._load_processor(local_files_only=False)
@@ -80,11 +89,11 @@ class BaseEmbeddingModel:
         del processor
         del model
         print("Download complete.", flush=True)
-        return Path(models_cache_dir)
+        return Path(MODELS_CACHE_DIR)
 
     def delete_model(self) -> Path:
         """Unload and remove this checkpoint's cached model directory."""
-        repo_cache_dir = Path(models_cache_dir) / f"models--{self.CKPT.replace('/', '--')}"
+        repo_cache_dir = Path(MODELS_CACHE_DIR) / f"models--{self.CKPT.replace('/', '--')}"
         self.unload_model()
         if repo_cache_dir.exists():
             shutil.rmtree(repo_cache_dir)
@@ -99,7 +108,7 @@ class BaseEmbeddingModel:
             self.download_model()
 
         self._processor = self._load_processor(local_files_only=True)
-        self._model = self._load_model(local_files_only=True).to(device)
+        self._model = self._load_model(local_files_only=True).to(DEVICE)
         self._model.eval()
         return self._processor, self._model
 
@@ -119,13 +128,13 @@ class BaseEmbeddingModel:
     def _move_inputs_to_device(self, inputs):
         """Move tensors inside processor outputs to the configured compute device."""
         if hasattr(inputs, "to"):
-            return inputs.to(device)
+            return inputs.to(DEVICE)
         if isinstance(inputs, dict):
             return {
-                name: tensor.to(device) if isinstance(tensor, torch.Tensor) else tensor
+                name: tensor.to(DEVICE) if isinstance(tensor, torch.Tensor) else tensor
                 for name, tensor in inputs.items()
             }
-        return inputs.to(device) if isinstance(inputs, torch.Tensor) else inputs
+        return  inputs
 
     def _to_pil_image(self, image: str | Path | Image.Image) -> Image.Image:
         """Load a path-like image or normalize an existing PIL image to RGB."""
@@ -138,6 +147,7 @@ class BaseEmbeddingModel:
             raise ValueError("images must not be empty")
 
     def _validate_texts(self, texts: Sequence[str]) -> None:
+        
         if not texts:
             raise ValueError("texts must not be empty")
         if any(not text.strip() for text in texts):

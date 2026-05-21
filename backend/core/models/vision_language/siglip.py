@@ -12,6 +12,7 @@ from backend.core.models.vision_language.base import BaseEmbeddingModel
 
 class SiglipEmbeddingModel(BaseEmbeddingModel):
     CKPT = "google/siglip2-base-patch16-224"
+    embedding_dim = 768
     processor_class = AutoProcessor
     model_class = AutoModel
 
@@ -22,12 +23,13 @@ class SiglipEmbeddingModel(BaseEmbeddingModel):
         processor, model = self.load_model()
         pil_images = [self._to_pil_image(image) for image in images]
         inputs = processor(images=pil_images, return_tensors="pt")
+        del pil_images
         inputs = self._move_inputs_to_device(inputs)
 
         with torch.inference_mode():
             image_features = model.get_image_features(**inputs)
 
-        return self._normalize_embeddings(_coerce_siglip_features(image_features))
+        return self._normalize_embeddings(image_features.pooler_output)
 
     def embed_texts(self, texts: Sequence[str]) -> torch.Tensor:
         """Encode texts with SigLIP and return normalized text embeddings."""
@@ -45,23 +47,9 @@ class SiglipEmbeddingModel(BaseEmbeddingModel):
         with torch.inference_mode():
             text_features = model.get_text_features(**inputs)
 
-        return self._normalize_embeddings(_coerce_siglip_features(text_features))
+        return self._normalize_embeddings(text_features.pooler_output)
 
 
 class SiglipLargeEmbeddingModel(SiglipEmbeddingModel):
     CKPT = "google/siglip2-large-patch16-384"
-
-
-def _coerce_siglip_features(output) -> torch.Tensor:
-    """Extract an embedding tensor from supported SigLIP output shapes."""
-    if isinstance(output, torch.Tensor):
-        return output
-
-    pooled_output = getattr(output, "pooler_output", None)
-    if isinstance(pooled_output, torch.Tensor):
-        return pooled_output
-
-    raise TypeError(
-        "SigLIP feature output did not match the expected contract. "
-        f"Expected a tensor or an object with pooler_output, got {type(output).__name__}."
-    )
+    embedding_dim = 1024

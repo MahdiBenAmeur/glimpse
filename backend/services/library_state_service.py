@@ -4,15 +4,15 @@ import json
 from typing import Any
 
 from backend.config import IMAGE_META_PATH, LIBRARY_STATE_PATH
-from backend.core.models.vision_language.store import get_loaded_image_metadata
+from backend.core.models.vision_language.store import get_loaded_image_vs_metadata
 from backend.utils.path_utils import canonicalize_path, canonicalize_path_key
 
 
-def load_image_meta_data() -> dict[str, Any]:
+def load_image_vs_meta_data() -> dict[str, Any]:
     """
     Loads image metadata from disk.
     """
-    loaded_meta = get_loaded_image_metadata()
+    loaded_meta = get_loaded_image_vs_metadata()
     if isinstance(loaded_meta, dict) and loaded_meta:
         return loaded_meta
     if not IMAGE_META_PATH.exists():
@@ -29,7 +29,7 @@ def list_indexed_images() -> list[dict[str, Any]]:
     """
     Lists all indexed images.
     """
-    meta_data = load_image_meta_data()
+    meta_data = load_image_vs_meta_data()
     items: list[dict[str, Any]] = []
     for key, value in meta_data.items():
         if str(key).startswith("_") or not isinstance(value, dict):
@@ -52,7 +52,7 @@ def get_indexed_image(image_id: int) -> dict[str, Any] | None:
     """
     Retrieves metadata for a specific indexed image.
     """
-    image_entry = load_image_meta_data().get(str(image_id))
+    image_entry = load_image_vs_meta_data().get(str(image_id))
     if not isinstance(image_entry, dict):
         return None
     image_path = image_entry.get("image_path")

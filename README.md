@@ -125,7 +125,7 @@ Glimpse keeps most runtime data locally:
 - `IMAGE_VS_PATH`: image embeddings and image metadata
 - `FACE_VS_PATH`: face embeddings and face-level metadata
 - `PERSON_VS_PATH`: people centroids and cluster metadata
-- `models_cache_dir`: downloaded model files
+- `MODELS_CACHE_DIR`: downloaded model files
 - `THUMBNAIL_CACHE_DIR`: generated thumbnail cache
 - `LIBRARY_STATE_PATH`: favorites and collection membership state
 - `MODEL_STATE_PATH`: active model selection

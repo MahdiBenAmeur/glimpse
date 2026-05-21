@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from backend.config import DATA_DIR, FACE_VS_PATH, IMAGE_VS_PATH, MODEL_STATE_PATH, PERSON_VS_PATH, THUMBNAIL_CACHE_DIR, models_cache_dir
+from backend.config import DATA_DIR, FACE_VS_PATH, IMAGE_VS_PATH, MODEL_STATE_PATH, PERSON_VS_PATH, THUMBNAIL_CACHE_DIR, MODELS_CACHE_DIR
 from backend.core.indexing.index import index_batch
 from backend.core.models.faces.store import finalize_face_clusters, reset_face_vector_stores, save_face_vector_stores
 from backend.core.models.vision_language.base import BaseEmbeddingModel
@@ -255,7 +255,7 @@ def _parse_size_bytes(size_text: str) -> int:
 
 def _model_repo_cache_dir(model: BaseEmbeddingModel) -> Path:
     cache_name = f"models--{model.CKPT.replace('/', '--')}"
-    return Path(models_cache_dir) / cache_name
+    return Path(MODELS_CACHE_DIR) / cache_name
 
 
 def _model_cache_size_bytes(model: BaseEmbeddingModel) -> int:

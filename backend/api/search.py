@@ -17,7 +17,7 @@ from backend.core.search.search import global_search, search_by_image
 from backend.api.index import get_active_model_id, get_active_model_info, get_embedding_model
 from backend.services.media_service import ensure_thumbnail, get_image_dimensions, get_image_taken_at
 from backend.services.collection_service import CollectionService
-from backend.services.library_state_service import get_image_state, load_image_meta_data
+from backend.services.library_state_service import get_image_state, load_image_vs_meta_data
 from backend.db_models.database import Session as DBSession, engine
 
 router = APIRouter(prefix="/search", tags=["search"])
@@ -74,8 +74,8 @@ class SearchResponse(BaseModel):
     results: list[SearchImageResult]
 
 
-def _load_image_meta_data() -> dict[str, Any]:
-    return load_image_meta_data()
+def _load_image_vs_meta_data() -> dict[str, Any]:
+    return load_image_vs_meta_data()
 
 
 def _normalize_person_preference(value: str) -> str:
@@ -280,7 +280,7 @@ async def upload_face_photo(file: UploadFile = File(...)) -> dict[str, str]:
 
 @router.get("/images/{image_id}/file", name="read_search_image_file")
 def read_search_image_file(image_id: int) -> FileResponse:
-    meta_data = _load_image_meta_data()
+    meta_data = _load_image_vs_meta_data()
     image_entry = meta_data.get(str(image_id))
     if image_entry is None:
         raise HTTPException(status_code=404, detail="Image not found in the index")
@@ -295,7 +295,7 @@ def read_search_image_file(image_id: int) -> FileResponse:
 
 @router.get("/images/{image_id}/thumbnail", name="read_search_image_thumbnail")
 def read_search_image_thumbnail(image_id: int) -> FileResponse:
-    meta_data = _load_image_meta_data()
+    meta_data = _load_image_vs_meta_data()
     image_entry = meta_data.get(str(image_id))
     if image_entry is None:
         raise HTTPException(status_code=404, detail="Image not found in the index")
@@ -314,7 +314,7 @@ def read_search_image_thumbnail(image_id: int) -> FileResponse:
 
 @router.get("/similar/{image_id}", response_model=list[SearchImageResult])
 def find_similar_images(image_id: int, request: Request, limit: int = 12) -> list[dict[str, Any]]:
-    meta_data = _load_image_meta_data()
+    meta_data = _load_image_vs_meta_data()
     image_entry = meta_data.get(str(image_id))
     if image_entry is None:
         raise HTTPException(status_code=404, detail="Image not found in the index")

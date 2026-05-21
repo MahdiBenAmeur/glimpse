@@ -2,9 +2,10 @@ from pathlib import Path
 
 from platformdirs import user_config_dir , user_cache_dir
 import os
+import torch
 
 APP_NAME = "Glimpse"
-APP_AUTHOR = "Glimpse_one"
+APP_AUTHOR = "Mahdi_BA"
 
 #DATA_DIR = Path(user_config_dir(APP_NAME, APP_AUTHOR))
 #CACHE_DIR = Path(user_cache_dir(APP_NAME, APP_AUTHOR))
@@ -13,10 +14,6 @@ DATA_DIR = Path("backend/data")
 CACHE_DIR = Path("backend/data")
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(CACHE_DIR, exist_ok=True)
-
-# Backwards-compatible aliases used by model loaders.
-data_dir = DATA_DIR
-cache_dir = CACHE_DIR
 
 # GENERAL APP STORAGE
 SQLITE_DB_PATH = DATA_DIR / "glimpse.db"
@@ -36,21 +33,18 @@ IMAGE_VS_PATH = DATA_DIR / "image_vector_store"
 IMAGE_META_PATH = IMAGE_VS_PATH / "meta_data.json"
 
 # GENERAL MODEL CONFIG
-device = "cpu"
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-models_cache_dir = DATA_DIR / "cache_dir"
+MODELS_CACHE_DIR = DATA_DIR / "cache_dir"
 
-
-# FACE CONFIG
-DETECTOR_MODEL = None
-FACE_EMBEDDING_MODEL = None
-FACE_DETECTION_CONFIDENCE_THRESHOLD = 0.50
-FACE_MIN_BOX_SIZE = 64
 
 # FACE CONFIG
+FACE_EMBEDDING_MODEL_ID = "gaunernst/vit_small_patch8_gap_112.cosface_ms1mv3"
+DETECTOR_MODEL_ID = "AdamCodd/YOLOv11n-face-detection"
 DETECTOR_MODEL = None
 FACE_EMBEDDING_MODEL = None
 FACE_DETECTION_CONFIDENCE_THRESHOLD = 0.5
+FACE_MIN_BOX_SIZE = 64
 FACE_PIPELINE_DBSCAN_EPS = 0.4       
 FACE_PIPELINE_DBSCAN_MIN_SAMPLES = 6
 FACE_QUALITY_REFERENCE_PIXELS = 4096

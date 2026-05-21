@@ -3,11 +3,10 @@
 # The PyTorch CPU wheel index is required for the +cpu package builds.
 # If you want to use GPU acceleration, install your own compatible PyTorch GPU version
 # for your CUDA/runtime setup after installing these requirements.
---extra-index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://download.pytorch.org/whl/cu128
 
-torch==2.8.0+cpu
-torchvision==0.23.0+cpu
-torchaudio==2.8.0+cpu
+torch==2.8.0+cu128
+torchvision==0.23.0+cu128
 
 fastapi==0.135.3
 uvicorn==0.44.0

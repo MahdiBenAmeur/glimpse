@@ -42,7 +42,7 @@ def index_image_batch(
         return stats
 
     embeddings = image_model.embed_images(valid_paths)
-    image_vector_store, image_store_meta_data = load_image_vector_store(int(embeddings.shape[1]), image_model)
+    image_vector_store, image_store_meta_data = load_image_vector_store(image_model)
     image_ids = [consume_next_id(image_store_meta_data) for _ in valid_paths]
     ids_array = np.array(image_ids, dtype=np.int64)
     embeddings_array = embeddings.numpy().astype("float32")

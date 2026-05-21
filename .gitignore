@@ -7,8 +7,9 @@ electron/node_modules
 electron/backend
 __pycache__
 desktopvenv
-backend/data/cache_dir
-backend/data/artifacts
+
+backend/data/
+
 test_images
 backend/data/face_vector_store
 backend/data/image_vector_store
@@ -19,7 +20,8 @@ test.py
 electron/node_modules
 glimpse.db
 hello
-
+video
+backend/tests
 serve_with_port.py
 desktop_app
 venv
@@ -30,5 +32,6 @@ commends
 test.py
 gpu_venv
 electron
+content
 
 glimpse_cpu_venv

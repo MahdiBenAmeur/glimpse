@@ -12,7 +12,7 @@ from sqlmodel import Session
 from backend.db_models.database import get_session
 from backend.core.models.faces.store import load_person_vector_store, merge_people, save_face_vector_stores
 from backend.services.media_service import get_image_dimensions, get_image_taken_at
-from backend.services.library_state_service import get_image_state, load_image_meta_data
+from backend.services.library_state_service import get_image_state, load_image_vs_meta_data
 from backend.services.person_service import PersonService
 from backend.schemas.person import PersonCreate, PersonUpdate, PersonRead
 from backend.utils.path_utils import canonicalize_path_key
@@ -128,7 +128,7 @@ def read_person_images(
     image_created_ats = entry.get("image_created_ats", [])
     image_id_by_path = {
         canonicalize_path_key(value.get("image_path")): int(key)
-        for key, value in load_image_meta_data().items()
+        for key, value in load_image_vs_meta_data().items()
         if not str(key).startswith("_") and isinstance(value, dict) and value.get("image_path")
     }
     seen_image_ids: set[int] = set()

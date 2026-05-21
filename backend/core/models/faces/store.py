@@ -31,10 +31,8 @@ person_vs = None
 person_meta_data = None
 
 
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
-
+ # Logging
+ 
 def _log_face_store(message: str, **fields: Any) -> None:
     timestamp = datetime.utcnow().isoformat(timespec="seconds")
     thread = threading.current_thread()
@@ -49,10 +47,8 @@ def _log_face_store(message: str, **fields: Any) -> None:
     print(f"[{timestamp}] [FACE STORE] {message}{suffix}", flush=True)
 
 
-# ---------------------------------------------------------------------------
-# Vector store lifecycle
-# ---------------------------------------------------------------------------
-
+ # Vector store lifecycle
+ 
 def reset_face_vector_stores() -> None:
     """Clear cached face and person stores so subsequent calls reload from disk."""
     global face_vs, face_meta_data, person_vs, person_meta_data
@@ -115,10 +111,8 @@ def save_face_vector_stores() -> None:
     _log_face_store("Saved face and person vector stores")
 
 
-# ---------------------------------------------------------------------------
-# Embedding helpers
-# ---------------------------------------------------------------------------
-
+ # Embedding helpers
+ 
 def _normalize_embedding(embedding: torch.Tensor) -> torch.Tensor:
     """Convert an embedding to a 1D normalized float32 CPU tensor."""
     vector = embedding.detach().cpu().to(torch.float32).reshape(-1)
@@ -131,13 +125,11 @@ def _empty_index() -> faiss.IndexIDMap2:
     return faiss.IndexIDMap2(faiss.IndexFlatIP(face_emb_dim))
 
 
-# ---------------------------------------------------------------------------
-# Face quality scoring
-# ---------------------------------------------------------------------------
-
+ # Face quality scoring
+ 
 def _face_box_area(face_box: list[float]) -> float:
     left, top, right, bottom = [float(v) for v in face_box]
-    return max(right - left, 1.0) * max(bottom - top, 1.0)
+    return max(right - left, 0.0) * max(bottom - top, 0.0)
 
 
 def _face_quality_weight(face_box: list[float]) -> float:
@@ -177,10 +169,8 @@ def _face_quality_score(image_path: Path, face_box: list[float], detection_confi
     return min(FACE_MAX_QUALITY_SCORE, max(1.0, quality))
 
 
-# ---------------------------------------------------------------------------
-# Face sample construction
-# ---------------------------------------------------------------------------
-
+ # Face sample construction
+ 
 def _make_face_sample(
     *,
     image_path: Path,
@@ -235,10 +225,8 @@ def _flatten_face_samples(
     return samples
 
 
-# ---------------------------------------------------------------------------
-# Top-face exemplar management
-# ---------------------------------------------------------------------------
-
+ # Top-face exemplar management
+ 
 def _make_top_face_entry(sample: dict[str, Any]) -> dict[str, Any]:
     """Convert a face sample into a serializable exemplar entry."""
     return {
@@ -290,9 +278,7 @@ def _trim_top_faces(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return normalized_entries[:FACE_TOP_EXEMPLAR_COUNT]
 
 
-# ---------------------------------------------------------------------------
-# Person store helpers
-# ---------------------------------------------------------------------------
+ # Person store helpers
 
 def _iter_data_entries(meta_data: dict[str, Any]):
     """Yield numeric metadata entries while skipping reserved underscore keys."""
@@ -445,10 +431,8 @@ def _all_face_samples(face_vector_store, face_store_meta_data: dict[str, Any]) -
     return samples
 
 
-# ---------------------------------------------------------------------------
-# Named-person preservation across re-clusters
-# ---------------------------------------------------------------------------
-
+ # Named-person preservation across re-clusters
+ 
 def _collect_named_people(person_store_meta_data: dict[str, Any]) -> list[dict[str, Any]]:
     """Capture named people before reclustering so names can be restored."""
     named_people = []
@@ -500,10 +484,8 @@ def _assign_faces_to_people(face_store_meta_data: dict[str, Any], person_store_m
                 face_entry["person_id"] = person_id
 
 
-# ---------------------------------------------------------------------------
-# Merge
-# ---------------------------------------------------------------------------
-
+ # Merge
+ 
 def _merge_person_entries(
     target_id: int,
     source_id: int,
@@ -557,10 +539,8 @@ def _merge_person_entries(
     del person_store_meta_data[str(source_id)]
 
 
-# ---------------------------------------------------------------------------
-# DBSCAN clustering pipeline
-# ---------------------------------------------------------------------------
-
+ # DBSCAN clustering pipeline
+ 
 def _cluster_face_samples_dbscan(
     samples: list[dict[str, Any]],
     face_store_meta_data: dict[str, Any],
@@ -641,10 +621,8 @@ def _cluster_face_samples_dbscan(
     return person_store_meta_data, stats
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
+ # Public API
+ 
 def merge_people(target_id: int, source_id: int) -> dict[str, Any]:
     """Merge two existing person clusters and persist the updated stores."""
     if target_id == source_id:

@@ -6,7 +6,7 @@ from huggingface_hub import hf_hub_download
 from PIL import Image
 from ultralytics import YOLO
 
-from backend.config import DETECTOR_MODEL, FACE_DETECTION_CONFIDENCE_THRESHOLD, FACE_MIN_BOX_SIZE, models_cache_dir
+from backend.config import DETECTOR_MODEL, FACE_DETECTION_CONFIDENCE_THRESHOLD, FACE_MIN_BOX_SIZE, DETECTOR_MODEL_ID, MODELS_CACHE_DIR, DEVICE
 
 
 def _log_face_detector(message: str, **fields) -> None:
@@ -34,13 +34,15 @@ def load_face_detector():
     global DETECTOR_MODEL
     if DETECTOR_MODEL is not None:
         return DETECTOR_MODEL
+
+    model_id = DETECTOR_MODEL_ID
     model_path = hf_hub_download(
-        repo_id="AdamCodd/YOLOv11n-face-detection",
+        repo_id=model_id,
         filename="model.pt",
-        cache_dir=models_cache_dir,
+        cache_dir=MODELS_CACHE_DIR,
     )
 
-    model = YOLO(model_path  )
+    model = YOLO(model_path).to(DEVICE)
     DETECTOR_MODEL = model
     return model
 
@@ -69,6 +71,7 @@ def detect_faces(
         min_box_size=min_box_size,
         **_gpu_memory_snapshot(),
     )
+
     results = model.predict(image_paths, save=False, conf=confidence_threshold)
     _log_face_detector("YOLO predict returned", result_count=len(results), **_gpu_memory_snapshot())
     path_2_boxes = {}
@@ -76,9 +79,6 @@ def detect_faces(
         if result.boxes is not None:
             filtered_boxes = []
             for box in result.boxes:
-                confidence = float(box.conf[0]) if getattr(box, "conf", None) is not None else 1.0
-                if confidence < confidence_threshold:
-                    continue
 
                 x1, y1, x2, y2 = box.xyxy[0].tolist()
                 width = x2 - x1
@@ -100,11 +100,12 @@ def crop_faces(path_2_boxes)-> dict[Path, list[Image.Image]]:
     """Crop detected face boxes into PIL images while preserving source paths."""
     path_2_crops = {}
     for image_path, boxes in path_2_boxes.items():
-        image = Image.open(image_path)
-        crops = []
-        for box in boxes:
-            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-            crop = image.crop((x1, y1, x2, y2))
-            crops.append(crop)
-        path_2_crops[image_path] = crops
+        with Image.open(image_path) as image:
+            image = image.convert("RGB")
+            crops = []
+            for box in boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                crop = image.crop((x1, y1, x2, y2)).copy()        
+                crops.append(crop)
+            path_2_crops[image_path] = crops
     return path_2_crops

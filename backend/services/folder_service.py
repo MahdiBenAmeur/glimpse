@@ -80,7 +80,7 @@ def _purge_indexed_folder_data(folder_path: str) -> None:
     def matches_folder(image_path: str) -> bool:
         return _path_is_within_folder(image_path, folder_path)
 
-    image_purge = purge_image_entries(matches_folder)
+    image_purge = purge_image_entries(folder_path)
     remove_image_states(image_purge.get("removed_ids", []))
     purge_face_entries(matches_folder)
 
