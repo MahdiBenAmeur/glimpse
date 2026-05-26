@@ -31,6 +31,8 @@ FACE_VS_PATH = DATA_DIR / "face_vector_store"
 PERSON_VS_PATH = DATA_DIR / "person_vector_store"
 IMAGE_VS_PATH = DATA_DIR / "image_vector_store"
 IMAGE_META_PATH = IMAGE_VS_PATH / "meta_data.json"
+VIDEO_VS_PATH = DATA_DIR / "video_vector_store"
+VIDEO_META_PATH = VIDEO_VS_PATH / "meta_data.json"
 
 # GENERAL MODEL CONFIG
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
