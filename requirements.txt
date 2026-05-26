@@ -28,3 +28,5 @@ ultralytics==8.4.37
 httpx==0.28.1
 
 scikit-learn==1.8.0
+
+av>=14.0,<15.0
