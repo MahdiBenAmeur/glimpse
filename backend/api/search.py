@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+import json
 import mimetypes
 from pathlib import Path
 import tempfile
@@ -11,11 +12,12 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from backend.config import FACE_QUERY_UPLOAD_DIR
+from backend.config import FACE_QUERY_UPLOAD_DIR, VIDEO_VS_PATH
 from backend.core.models.faces.store import load_face_vector_store, load_person_vector_store
-from backend.core.search.search import global_search, search_by_image
+from backend.core.models.vision_language.video.store import load_video_vector_store
+from backend.core.search.search import global_search, search_by_image, search_videos_by_text
 from backend.api.index import get_active_model_id, get_active_model_info, get_embedding_model
-from backend.services.media_service import ensure_thumbnail, get_image_dimensions, get_image_taken_at
+from backend.services.media_service import ensure_thumbnail, ensure_video_thumbnail, get_image_dimensions, get_video_dimensions, get_image_taken_at
 from backend.services.collection_service import CollectionService
 from backend.services.library_state_service import get_image_state, load_image_vs_meta_data
 from backend.db_models.database import Session as DBSession, engine
@@ -56,6 +58,39 @@ class SearchImageResult(BaseModel):
     people: list[str] = Field(default_factory=list)
     collections: list[str] = Field(default_factory=list)
     score: float | None = None
+
+
+class SearchVideoResult(BaseModel):
+    id: str
+    videoId: int
+    url: str
+    thumbnailUrl: str | None = None
+    path: str | None = None
+    filename: str
+    folder: str
+    dateTaken: str | None = None
+    width: int | None = None
+    height: int | None = None
+    duration: float | None = None
+    score: float | None = None
+    mediaType: str = "video"
+
+
+class VideoSearchRequest(BaseModel):
+    query: str
+    page: int = Field(default=1, ge=1)
+    pageSize: int = Field(default=50, ge=1, le=200)
+    modelId: str | None = None
+
+
+class VideoSearchResponse(BaseModel):
+    query: str
+    page: int
+    pageSize: int
+    totalResults: int
+    totalPages: int
+    activeModelId: str | None = None
+    results: list[SearchVideoResult]
 
 
 class FacePhotoUploadResponse(BaseModel):
@@ -253,6 +288,137 @@ def run_search(payload: SearchRequest, request: Request) -> dict[str, Any]:
         "activeModel": get_active_model_info(),
         "results": items,
     }
+
+
+def _load_video_vs_meta_data() -> dict[str, Any]:
+    vs_path = Path(str(VIDEO_VS_PATH))
+    meta_path = vs_path / "meta_data.json"
+    if not meta_path.exists():
+        return {}
+    try:
+        with meta_path.open("r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _build_video_search_result_item(
+    *,
+    request: Request,
+    video_id: int,
+    video_path: Path,
+    created_at: str | None,
+    duration: float | None,
+    score: float | None,
+) -> dict[str, Any]:
+    width, height = get_video_dimensions(video_path)
+    return {
+        "id": str(video_id),
+        "videoId": video_id,
+        "url": f"/api/search/videos/{video_id}/file",
+        "thumbnailUrl": f"/api/search/videos/{video_id}/thumbnail",
+        "path": str(video_path),
+        "filename": video_path.name,
+        "folder": str(video_path.parent),
+        "dateTaken": created_at,
+        "width": width,
+        "height": height,
+        "duration": duration,
+        "score": score,
+        "mediaType": "video",
+    }
+
+
+@router.post("/videos", response_model=VideoSearchResponse)
+def run_video_search(payload: VideoSearchRequest, request: Request) -> dict[str, Any]:
+    if not payload.query.strip():
+        raise HTTPException(status_code=400, detail="query must not be empty")
+
+    try:
+        video_model = get_embedding_model(payload.modelId or "xclip-video-b32")
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if not video_model.is_model_downloaded():
+        raise HTTPException(status_code=409, detail="X-CLIP video model is not downloaded. Download it first via /api/index/models/download")
+
+    if not hasattr(video_model, "embed_videos"):
+        raise HTTPException(status_code=400, detail="Selected model does not support video search")
+
+    try:
+        raw_results = search_videos_by_text(payload.query, video_model, top_k=payload.pageSize)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        print(exc)
+        raise HTTPException(status_code=500, detail=f"Video search failed: {exc}") from exc
+
+    total_results = len(raw_results)
+    total_pages = (total_results + payload.pageSize - 1) // total_results if total_results else 0
+    start_index = (payload.page - 1) * payload.pageSize
+    end_index = start_index + payload.pageSize
+
+    items: list[dict[str, Any]] = []
+    for result in raw_results[start_index:end_index]:
+        video_path_value = result.get("video_path")
+        if not video_path_value:
+            continue
+        video_path = Path(video_path_value)
+        items.append(
+            _build_video_search_result_item(
+                request=request,
+                video_id=int(result["video_id"]),
+                video_path=video_path,
+                created_at=result.get("created_at"),
+                duration=result.get("duration"),
+                score=result.get("score"),
+            )
+        )
+
+    return {
+        "query": payload.query,
+        "page": payload.page,
+        "pageSize": payload.pageSize,
+        "totalResults": total_results,
+        "totalPages": total_pages,
+        "activeModelId": payload.modelId or "xclip-video-b32",
+        "results": items,
+    }
+
+
+@router.get("/videos/{video_id}/file", name="read_search_video_file")
+def read_search_video_file(video_id: int) -> FileResponse:
+    meta_data = _load_video_vs_meta_data()
+    video_entry = meta_data.get(str(video_id))
+    if video_entry is None:
+        raise HTTPException(status_code=404, detail="Video not found in the index")
+
+    video_path = Path(video_entry.get("video_path", ""))
+    if not video_path.exists() or not video_path.is_file():
+        raise HTTPException(status_code=404, detail="Indexed video file is missing")
+
+    media_type = "video/mp4"
+    return FileResponse(path=video_path, filename=video_path.name, media_type=media_type)
+
+
+@router.get("/videos/{video_id}/thumbnail", name="read_search_video_thumbnail")
+def read_search_video_thumbnail(video_id: int) -> FileResponse:
+    meta_data = _load_video_vs_meta_data()
+    video_entry = meta_data.get(str(video_id))
+    if video_entry is None:
+        raise HTTPException(status_code=404, detail="Video not found in the index")
+
+    video_path = Path(video_entry.get("video_path", ""))
+    if not video_path.exists() or not video_path.is_file():
+        raise HTTPException(status_code=404, detail="Indexed video file is missing")
+
+    try:
+        thumbnail_path = ensure_video_thumbnail(video_path)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not build thumbnail: {exc}") from exc
+
+    return FileResponse(path=thumbnail_path, filename=thumbnail_path.name, media_type="image/jpeg")
 
 
 @router.post("/face-photo", response_model=FacePhotoUploadResponse)

@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from backend.config import IMAGE_META_PATH, LIBRARY_STATE_PATH
+from backend.config import IMAGE_META_PATH, LIBRARY_STATE_PATH, VIDEO_META_PATH
 from backend.core.models.vision_language.store import get_loaded_image_vs_metadata
+from backend.core.models.vision_language.video.store import get_loaded_video_vs_metadata
 from backend.utils.path_utils import canonicalize_path, canonicalize_path_key
 
 
@@ -19,6 +20,23 @@ def load_image_vs_meta_data() -> dict[str, Any]:
         return {}
     try:
         with IMAGE_META_PATH.open("r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def load_video_vs_meta_data() -> dict[str, Any]:
+    """
+    Loads video metadata from disk.
+    """
+    loaded_meta = get_loaded_video_vs_metadata()
+    if isinstance(loaded_meta, dict) and loaded_meta:
+        return loaded_meta
+    if not VIDEO_META_PATH.exists():
+        return {}
+    try:
+        with VIDEO_META_PATH.open("r", encoding="utf-8") as handle:
             loaded = json.load(handle)
     except (OSError, json.JSONDecodeError):
         return {}

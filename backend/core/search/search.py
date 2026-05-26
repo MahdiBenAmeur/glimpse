@@ -12,6 +12,7 @@ from backend.core.models.faces.embedding import embed_faces
 from backend.core.models.faces.store import load_face_vector_store, load_person_vector_store
 from backend.core.models.vision_language.base import BaseEmbeddingModel
 from backend.core.models.vision_language.store import load_image_vector_store
+from backend.core.models.vision_language.video.store import load_video_vector_store
 from backend.utils.vector_store_utils import embedding_row
 
 
@@ -225,6 +226,41 @@ def search_by_text(text: str, image_model: BaseEmbeddingModel, top_k: int = 10) 
     k = min(top_k, int(image_vs.ntotal))
     scores, ids = image_vs.search(embedding_row(text_embedding), k=k)
     return _collect_image_matches(scores, ids, image_vs_meta_data)
+
+
+def search_videos_by_text(text: str, video_model: BaseEmbeddingModel, top_k: int = 10) -> list[dict]:
+    """Search indexed videos by embedding a text query through the X-CLIP model."""
+    if not text.strip():
+        raise ValueError("text must not be empty")
+
+    top_k = _validate_top_k(top_k)
+    text_embedding = video_model.embed_text(text)
+    video_vs, video_vs_meta_data = load_video_vector_store(video_model)
+
+    if video_vs.ntotal == 0:
+        return []
+
+    k = min(top_k, int(video_vs.ntotal))
+    scores, ids = video_vs.search(embedding_row(text_embedding), k=k)
+
+    matches = []
+    for score, item_id in zip(scores[0], ids[0]):
+        item_id = int(item_id)
+        if item_id < 0:
+            continue
+
+        meta_entry = video_vs_meta_data.get(str(item_id), {})
+        matches.append(
+            {
+                "video_id": item_id,
+                "score": float(score),
+                "video_path": meta_entry.get("video_path"),
+                "created_at": meta_entry.get("created_at"),
+                "duration": meta_entry.get("duration"),
+                "media_type": "video",
+            }
+        )
+    return matches
 
 
 def search_by_image(

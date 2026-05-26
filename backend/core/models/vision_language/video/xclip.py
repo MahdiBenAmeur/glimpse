@@ -6,6 +6,7 @@ from typing import Sequence
 import av
 import numpy as np
 import torch
+from huggingface_hub import snapshot_download
 from PIL import Image
 from transformers import XCLIPProcessor, XCLIPModel
 
@@ -21,6 +22,25 @@ class XClipVideoEmbeddingModel(BaseEmbeddingModel):
     def __init__(self) -> None:
         super().__init__()
         self._processor = None
+
+    def is_model_downloaded(self) -> bool:
+        if self._processor is not None and self._model is not None:
+            return True
+
+        repo_cache_dir = Path(MODELS_CACHE_DIR) / f"models--{self.CKPT.replace('/', '--')}"
+        blobs_dir = repo_cache_dir / "blobs"
+        if not blobs_dir.exists():
+            return False
+
+        incomplete_files = list(blobs_dir.glob("*.incomplete"))
+        if incomplete_files:
+            return False
+
+        weight_files = list(blobs_dir.glob("*.safetensors")) + list(blobs_dir.glob("*.bin"))
+        if not weight_files:
+            return False
+
+        return True
 
     def _load_processor(self, *, local_files_only: bool):
         return XCLIPProcessor.from_pretrained(

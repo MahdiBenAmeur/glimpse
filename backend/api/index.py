@@ -11,13 +11,19 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from backend.config import DATA_DIR, FACE_VS_PATH, IMAGE_VS_PATH, MODEL_STATE_PATH, PERSON_VS_PATH, THUMBNAIL_CACHE_DIR, MODELS_CACHE_DIR
+from backend.config import DATA_DIR, FACE_VS_PATH, IMAGE_VS_PATH, MODEL_STATE_PATH, PERSON_VS_PATH, THUMBNAIL_CACHE_DIR, MODELS_CACHE_DIR, VIDEO_VS_PATH
 from backend.core.indexing.index import index_batch
+from backend.core.indexing.index_videos import index_video_batch
 from backend.core.models.faces.store import finalize_face_clusters, reset_face_vector_stores, save_face_vector_stores
 from backend.core.models.vision_language.base import BaseEmbeddingModel
 from backend.core.models.vision_language.clip import ClipEmbeddingModel
 from backend.core.models.vision_language.siglip import SiglipEmbeddingModel, SiglipLargeEmbeddingModel
 from backend.core.models.vision_language.store import reset_image_vector_store, save_image_vector_store
+from backend.core.models.vision_language.video.store import (
+    reset_video_vector_store,
+    save_video_vector_store,
+)
+from backend.core.models.vision_language.video.xclip import XClipVideoEmbeddingModel
 from backend.db_models.database import get_session
 from backend.db_models.folder import Folder
 from backend.services.folder_service import _folder_score
@@ -25,6 +31,7 @@ from backend.services.media_service import clear_thumbnail_cache
 from backend.utils.image_processing import list_image_files
 from backend.utils.path_utils import canonicalize_path, canonicalize_path_key
 from backend.utils.vector_store_utils import delete_vs
+from backend.utils.video_processing import list_video_files, prepare_videos
 
 router = APIRouter(prefix="/index", tags=["index"])
 
@@ -62,6 +69,7 @@ class IndexSummaryResponse(BaseModel):
     indexingStatus: IndexingStatusResponse
     lastIndexedTime: str | None = None
     totalIndexedImages: int = 0
+    totalIndexedVideos: int = 0
     totalPeople: int = 0
     totalFolders: int = 0
     indexedPaths: list[str] = Field(default_factory=list)
@@ -100,6 +108,9 @@ class StorageSummaryResponse(BaseModel):
     thumbnailCacheBytes: int
 
 
+VIDEO_DEFAULT_BATCH_SIZE = 4
+
+
 MODEL_CATALOG: list[dict[str, Any]] = [
     {
         "id": "clip-vit-b32",
@@ -131,6 +142,16 @@ MODEL_CATALOG: list[dict[str, Any]] = [
         "suitability": "GPU recommended",
         "factory": SiglipLargeEmbeddingModel,
     },
+    {
+        "id": "xclip-video-b32",
+        "name": "X-CLIP Video",
+        "description": "Video embedding model for searching videos by text",
+        "quality": "standard",
+        "speed": "moderate",
+        "diskSize": "600 MB",
+        "suitability": "GPU recommended",
+        "factory": XClipVideoEmbeddingModel,
+    },
 ]
 
 _model_map = {entry["id"]: entry for entry in MODEL_CATALOG}
@@ -153,6 +174,7 @@ _index_state: dict[str, Any] = {
     "error": None,
     "lastIndexedTime": None,
     "totalIndexedImages": 0,
+    "totalIndexedVideos": 0,
     "indexedPaths": [],
 }
 
@@ -197,6 +219,8 @@ def get_active_model_id() -> str | None:
 def _default_batch_size_for_model(model_id: str | None) -> int:
     if model_id == SIGLIP2_LARGE_MODEL_ID:
         return SIGLIP2_LARGE_BATCH_SIZE
+    if model_id == "xclip-video-b32":
+        return VIDEO_DEFAULT_BATCH_SIZE
     return DEFAULT_INDEX_BATCH_SIZE
 
 
@@ -388,8 +412,10 @@ def _is_cancel_requested() -> bool:
 
 def _reset_vector_stores() -> None:
     reset_image_vector_store()
+    reset_video_vector_store()
     reset_face_vector_stores()
     delete_vs(IMAGE_VS_PATH)
+    delete_vs(VIDEO_VS_PATH)
     delete_vs(FACE_VS_PATH)
     delete_vs(PERSON_VS_PATH)
 
@@ -422,6 +448,7 @@ def _coarse_phase(processed: int, total: int) -> IndexPhase:
 
 def _save_partial_index_state() -> None:
     save_image_vector_store()
+    save_video_vector_store()
     save_face_vector_stores()
 
 
@@ -516,6 +543,7 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
         image_model = get_embedding_model(model_id)
         _log_index_api("Resolved image model for index job", model_id=model_id, model_type=type(image_model).__name__)
         discovered_batches: list[tuple[Path, list[Path]]] = []
+        video_batches: list[tuple[Path, list[Path]]] = []
 
         for folder_path in folder_paths:
             if _is_cancel_requested():
@@ -530,9 +558,12 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
 
             current_file = str(folder_path)
             files = list_image_files(folder_path, recursive=recursive)
+            vfiles = list_video_files(folder_path, recursive=recursive)
             discovered_batches.append((folder_path, files))
-            total_files += len(files)
-            _log_index_api("Discovered files for folder", folder_path=str(folder_path), file_count=len(files))
+            if vfiles:
+                video_batches.append((folder_path, vfiles))
+            total_files += len(files) + len(vfiles)
+            _log_index_api("Discovered files for folder", folder_path=str(folder_path), image_count=len(files), video_count=len(vfiles))
 
         _set_state(
             phase="scanning",
@@ -677,6 +708,92 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
             )
             return
 
+        # --- Video indexing pass ---
+        if video_batches:
+            _log_index_api("Starting video indexing pass", folder_count=len(video_batches))
+            video_model = XClipVideoEmbeddingModel()
+            video_model.load_model()
+            video_processed = 0
+            video_skipped = 0
+            for folder_path, vfiles in video_batches:
+                if _is_cancel_requested():
+                    video_model.unload_model()
+                    _finish_cancelled_index_job(
+                        total_files=total_files,
+                        processed_count=processed_count,
+                        faces_detected=faces_detected,
+                        skipped_count=skipped_count,
+                        current_file=current_file,
+                    )
+                    return
+
+                current_file = str(vfiles[0]) if vfiles else str(folder_path)
+                for batch_start in range(0, len(vfiles), VIDEO_DEFAULT_BATCH_SIZE):
+                    if _is_cancel_requested():
+                        video_model.unload_model()
+                        _finish_cancelled_index_job(
+                            total_files=total_files,
+                            processed_count=processed_count,
+                            faces_detected=faces_detected,
+                            skipped_count=skipped_count,
+                            current_file=current_file,
+                        )
+                        return
+
+                    batch_paths = vfiles[batch_start:batch_start + VIDEO_DEFAULT_BATCH_SIZE]
+                    valid_paths, failed_items, path_2_duration, path_2_created_at = prepare_videos(batch_paths)
+                    video_skipped += len(failed_items)
+
+                    from backend.core.indexing.index import _dedupe_unindexed_video_paths
+
+                    valid_paths, path_2_created_at, path_2_duration, skipped_existing = _dedupe_unindexed_video_paths(
+                        valid_paths, path_2_created_at, path_2_duration,
+                    )
+                    video_skipped += len(skipped_existing)
+
+                    if not valid_paths:
+                        continue
+
+                    video_stats = index_video_batch(
+                        video_model,
+                        valid_paths,
+                        path_2_created_at=path_2_created_at,
+                        path_2_duration=path_2_duration,
+                    )
+                    video_processed += video_stats.get("indexed_count", 0)
+                    processed_count += video_stats.get("indexed_count", 0)
+                    skipped_count += video_stats.get("failed_count", 0)
+
+                    progress = int(round((processed_count / total_files) * 100)) if total_files else 100
+                    _set_state(
+                        phase="embeddings",
+                        progress=progress,
+                        total=total_files,
+                        processed=processed_count,
+                        facesDetected=faces_detected,
+                        skipped=skipped_count,
+                        currentFile=current_file,
+                    )
+                    _log_index_api(
+                        "Video batch finished",
+                        folder_path=str(folder_path),
+                        batch_start=batch_start,
+                        indexed=video_stats.get("indexed_count"),
+                    )
+
+            video_model.unload_model()
+            _log_index_api("Video indexing pass completed", processed=video_processed, skipped=video_skipped)
+
+        if _is_cancel_requested():
+            _finish_cancelled_index_job(
+                total_files=total_files,
+                processed_count=processed_count,
+                faces_detected=faces_detected,
+                skipped_count=skipped_count,
+                current_file=current_file,
+            )
+            return
+
         _set_state(
             phase="clustering",
             progress=99,
@@ -713,6 +830,7 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
             error=None,
             lastIndexedTime=completed_at,
             totalIndexedImages=_count_store_records(IMAGE_VS_PATH),
+            totalIndexedVideos=_count_store_records(VIDEO_VS_PATH),
             mergedPeople=int(final_face_merge_stats.get("merged_person_count", 0)),
         )
         _log_index_api(
@@ -993,6 +1111,7 @@ def read_index_summary(session: Session = Depends(get_session)) -> dict[str, Any
         },
         "lastIndexedTime": last_indexed_time,
         "totalIndexedImages": _count_store_records(IMAGE_VS_PATH),
+        "totalIndexedVideos": _count_store_records(VIDEO_VS_PATH),
         "totalPeople": _count_store_records(PERSON_VS_PATH),
         "totalFolders": len(folders),
         "indexedPaths": [folder.path for folder in folders],
@@ -1094,7 +1213,7 @@ def reindex(payload: StartIndexRequest, session: Session = Depends(get_session))
 def read_storage_summary() -> dict[str, Any]:
     return {
         "indexPath": str(DATA_DIR.resolve()),
-        "indexSizeBytes": _directory_size_bytes(IMAGE_VS_PATH) + _directory_size_bytes(FACE_VS_PATH) + _directory_size_bytes(PERSON_VS_PATH),
+        "indexSizeBytes": _directory_size_bytes(IMAGE_VS_PATH) + _directory_size_bytes(VIDEO_VS_PATH) + _directory_size_bytes(FACE_VS_PATH) + _directory_size_bytes(PERSON_VS_PATH),
         "thumbnailCachePath": str(THUMBNAIL_CACHE_DIR.resolve()),
         "thumbnailCacheBytes": _directory_size_bytes(THUMBNAIL_CACHE_DIR),
     }

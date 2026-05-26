@@ -12,7 +12,7 @@ from backend.core.models.faces.store import finalize_face_clusters, save_face_ve
 from backend.core.models.vision_language.base import BaseEmbeddingModel
 from backend.core.models.vision_language.store import save_image_vector_store
 from backend.services.app_settings_service import load_app_settings
-from backend.services.library_state_service import load_image_vs_meta_data
+from backend.services.library_state_service import load_image_vs_meta_data, load_video_vs_meta_data
 from backend.utils.image_processing import coerce_image_paths, list_image_files, prepare_images
 from backend.utils.path_utils import canonicalize_path_key
 
@@ -64,6 +64,37 @@ def _dedupe_unindexed_paths(
         unique_created_at[path] = path_2_created_at.get(path)
 
     return unique_paths, unique_created_at, skipped_existing
+
+
+def _dedupe_unindexed_video_paths(
+    valid_paths: list[Path],
+    path_2_created_at: dict[Path, str | None],
+    path_2_duration: dict[Path, float | None],
+) -> tuple[list[Path], dict[Path, str | None], dict[Path, float | None], list[dict]]:
+    """Remove videos already present in metadata and report the skipped paths."""
+    video_vs_meta_data = load_video_vs_meta_data()
+    seen_keys = {
+        canonicalize_path_key(entry.get("video_path"))
+        for key, entry in video_vs_meta_data.items()
+        if not str(key).startswith("_") and isinstance(entry, dict) and entry.get("video_path")
+    }
+
+    unique_paths: list[Path] = []
+    unique_created_at: dict[Path, str | None] = {}
+    unique_duration: dict[Path, float | None] = {}
+    skipped_existing: list[dict] = []
+
+    for path in valid_paths:
+        path_key = canonicalize_path_key(path)
+        if path_key in seen_keys:
+            skipped_existing.append({"path": str(path), "reason": "already_indexed"})
+            continue
+        seen_keys.add(path_key)
+        unique_paths.append(path)
+        unique_created_at[path] = path_2_created_at.get(path)
+        unique_duration[path] = path_2_duration.get(path)
+
+    return unique_paths, unique_created_at, unique_duration, skipped_existing
 
 
 def _chunk_paths(paths: Sequence[Path], batch_size: int) -> list[list[Path]]:
