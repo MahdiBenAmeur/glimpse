@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Sequence
 import torch
 from PIL import Image
-from huggingface_hub import snapshot_download
 from transformers.image_utils import load_image
 
 from backend.config import DEVICE, MODELS_CACHE_DIR
@@ -66,16 +65,28 @@ class BaseEmbeddingModel:
         if self._processor is not None and self._model is not None:
             return True
 
-        try:
-            snapshot_download(
-                repo_id=self.CKPT,
-                cache_dir=MODELS_CACHE_DIR,
-                local_files_only=True,
-                **({"allow_patterns": ["*.json", "*.txt", "*.model", "*.safetensors", "*.bin", "*.py"]}),
-            )
-            return True
-        except Exception:
+        repo_cache_dir = Path(MODELS_CACHE_DIR) / f"models--{self.CKPT.replace('/', '--')}"
+        blobs_dir = repo_cache_dir / "blobs"
+        if not blobs_dir.exists():
             return False
+
+        incomplete_files = list(blobs_dir.glob("*.incomplete"))
+        if incomplete_files:
+            return False
+
+        snapshots_dir = repo_cache_dir / "snapshots"
+        if not snapshots_dir.exists():
+            return False
+
+        has_weight_file = any(
+            list(snapshot_dir.glob("*.safetensors")) or list(snapshot_dir.glob("*.bin"))
+            for snapshot_dir in snapshots_dir.iterdir()
+            if snapshot_dir.is_dir()
+        )
+        if not has_weight_file:
+            return False
+
+        return True
 
     def download_model(self) -> Path:
         """Download processor and model files into the configured model cache."""

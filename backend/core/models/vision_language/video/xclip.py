@@ -36,8 +36,16 @@ class XClipVideoEmbeddingModel(BaseEmbeddingModel):
         if incomplete_files:
             return False
 
-        weight_files = list(blobs_dir.glob("*.safetensors")) + list(blobs_dir.glob("*.bin"))
-        if not weight_files:
+        snapshots_dir = repo_cache_dir / "snapshots"
+        if not snapshots_dir.exists():
+            return False
+
+        has_weight_file = any(
+            list(snapshot_dir.glob("*.safetensors")) or list(snapshot_dir.glob("*.bin"))
+            for snapshot_dir in snapshots_dir.iterdir()
+            if snapshot_dir.is_dir()
+        )
+        if not has_weight_file:
             return False
 
         return True

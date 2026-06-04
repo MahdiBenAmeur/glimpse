@@ -1,5 +1,10 @@
 import sys
 import os
+from dotenv import load_dotenv
+
+# Load .env from the project root so values like HF_TOKEN are visible to
+# Hugging Face Hub before any model downloads are initiated.
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 # Ensure the project root is importable when using a bundled/private Python runtime.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
