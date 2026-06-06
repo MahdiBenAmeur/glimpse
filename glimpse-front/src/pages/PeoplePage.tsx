@@ -2,8 +2,7 @@ import { useState } from "react";
 import { Search, Users as UsersIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { useApp } from "@/contexts/AppContext";
+import { useApp } from "@/contexts/useApp";
 import { useNavigate } from "react-router-dom";
 
 export default function PeoplePage() {

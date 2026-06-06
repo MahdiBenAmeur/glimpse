@@ -1,6 +1,6 @@
 import { Bookmark, Play, Edit2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useApp } from "@/contexts/AppContext";
+import { useApp } from "@/contexts/useApp";
 import { useNavigate } from "react-router-dom";
 
 export default function SavedSearchesPage() {

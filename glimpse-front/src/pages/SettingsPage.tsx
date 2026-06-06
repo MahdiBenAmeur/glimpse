@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme } from "@/contexts/useTheme";
 import { Download, Check, Loader2, AlertTriangle, HardDrive, FolderOpen, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,8 +8,8 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { toast } from "@/components/ui/sonner";
-import { useApp } from "@/contexts/AppContext";
+import { toast } from "sonner";
+import { useApp } from "@/contexts/useApp";
 import { clearCache, getStorageSummary, type StorageSummary } from "@/lib/api";
 
 const tabs = ["General", "Models", "Storage", "Indexing", "Interface"];

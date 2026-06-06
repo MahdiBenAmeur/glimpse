@@ -2,17 +2,18 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Edit2, Trash2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useApp } from "@/contexts/AppContext";
+import { useApp } from "@/contexts/useApp";
 import { ResultsGrid } from "@/components/search/ResultsGrid";
 import { getCollectionImages, pickCollectionImages } from "@/lib/api";
-import { toast } from "@/components/ui/sonner";
+import type { ImageResult } from "@/types/app";
+import { toast } from "sonner";
 
 export default function CollectionDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { collections, deleteCollection, refreshData } = useApp();
   const collection = collections.find(c => c.id === id);
-  const [collectionImages, setCollectionImages] = useState<any[]>([]);
+  const [collectionImages, setCollectionImages] = useState<ImageResult[]>([]);
 
   const loadCollectionImages = async (collectionId: string) => {
     const images = await getCollectionImages(collectionId);

@@ -1,7 +1,7 @@
 import { Loader2, Database, Users, Image, AlertTriangle, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { useApp } from "@/contexts/AppContext";
+import { useApp } from "@/contexts/useApp";
 
 const phaseLabels: Record<string, string> = {
   scanning: "Scanning folders",

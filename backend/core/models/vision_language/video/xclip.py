@@ -114,11 +114,15 @@ class XClipVideoEmbeddingModel(BaseEmbeddingModel):
         all_embeddings: list[torch.Tensor] = []
         for video_path in video_paths:
             frames = self._read_video_frames(video_path)
-            inputs = processor(
-                videos=list(frames),
+            inputs = processor.image_processor(
+                images=list(frames),
                 return_tensors="pt",
             )
             inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
+            # image_processor returns (num_frames, C, H, W);
+            # get_video_features expects (1, num_frames, C, H, W)
+            if inputs["pixel_values"].dim() == 4:
+                inputs["pixel_values"] = inputs["pixel_values"].unsqueeze(0)
             with torch.inference_mode():
                 outputs = model.get_video_features(**inputs)
             video_embed = outputs.pooler_output
@@ -143,6 +147,7 @@ class XClipVideoEmbeddingModel(BaseEmbeddingModel):
         with torch.inference_mode():
             text_features = model.get_text_features(**inputs)
 
+        text_features = text_features.pooler_output
         return self._normalize_embeddings(text_features)
 
     def embed_images(self, images: Sequence[str | Path | Image.Image]) -> torch.Tensor:

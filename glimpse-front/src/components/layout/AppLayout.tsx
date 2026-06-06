@@ -1,7 +1,7 @@
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import type { ReactNode } from "react";
-import { useApp } from "@/contexts/AppContext";
+import { useApp } from "@/contexts/useApp";
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const { settings } = useApp();

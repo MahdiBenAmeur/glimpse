@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { useApp } from "@/contexts/AppContext";
+import { useApp } from "@/contexts/useApp";
 import { EXAMPLE_SEARCHES } from "@/data/exampleSearches";
 import { ResultsGrid } from "@/components/search/ResultsGrid";
 import { AdvancedFiltersDrawer } from "@/components/search/AdvancedFiltersDrawer";
@@ -113,7 +113,7 @@ function buildFilterChips(
 }
 
 export default function SearchPage() {
-  const { images, activeModel, lastIndexedTime, people, searchImages, searchSimilarImages, searchImagesByFile, startIndexing, saveSearch } = useApp();
+  const { images, videoResults, activeModel, lastIndexedTime, people, searchImages, searchVideos, searchSimilarImages, searchImagesByFile, startIndexing, saveSearch } = useApp();
   const location = useLocation();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -131,6 +131,7 @@ export default function SearchPage() {
   const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [saveName, setSaveName] = useState("");
+  const [mediaTab, setMediaTab] = useState<"all" | "images" | "videos">("all");
 
   const peopleLookup = useMemo(
     () => new Map(people.filter((person) => person.name).map((person) => [Number(person.id), person.name as string])),
@@ -150,7 +151,10 @@ export default function SearchPage() {
     setHasSearched(true);
     setIsSearching(true);
     try {
-      await searchImages(query, searchFilterRequest);
+      await Promise.all([
+        searchImages(query, searchFilterRequest),
+        query.trim() ? searchVideos(query) : Promise.resolve([]),
+      ]);
     } finally {
       setIsSearching(false);
     }
@@ -168,7 +172,10 @@ export default function SearchPage() {
       facePhotoPath: null,
     });
     try {
-      await searchImagesByFile(file);
+      await Promise.all([
+        searchImagesByFile(file),
+        searchVideos(""),
+      ]);
     } finally {
       setIsSearching(false);
     }
@@ -239,7 +246,10 @@ export default function SearchPage() {
         setHasSearched(true);
         setIsSearching(true);
         try {
-          await searchImages(state.savedSearch.query || "", nextFilters);
+          await Promise.all([
+            searchImages(state.savedSearch.query || "", nextFilters),
+            state.savedSearch.query ? searchVideos(state.savedSearch.query) : Promise.resolve([]),
+          ]);
         } finally {
           if (!cancelled) {
             setIsSearching(false);
@@ -254,7 +264,10 @@ export default function SearchPage() {
         setHasSearched(true);
         setIsSearching(true);
         try {
-          await searchSimilarImages(state.similarImageId);
+          await Promise.all([
+            searchSimilarImages(state.similarImageId),
+            searchVideos(""),
+          ]);
         } finally {
           if (!cancelled) {
             setIsSearching(false);
@@ -268,7 +281,7 @@ export default function SearchPage() {
     return () => {
       cancelled = true;
     };
-  }, [location.pathname, location.state, navigate, peopleLookup, searchImages, searchSimilarImages]);
+  }, [location.pathname, location.state, navigate, peopleLookup, searchImages, searchSimilarImages, searchVideos]);
 
   return (
     <div className="h-full flex flex-col">
@@ -423,6 +436,27 @@ export default function SearchPage() {
         </div>
       )}
 
+      {/* Media tabs */}
+      {hasSearched && !isSearching && (
+        <div className="px-6 pb-3 shrink-0">
+          <div className="flex gap-1 max-w-2xl mx-auto">
+            {(["all", "images", "videos"] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setMediaTab(tab)}
+                className={`px-3 py-1.5 text-xs rounded-md transition-colors capitalize ${
+                  mediaTab === tab
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {tab === "all" ? "All" : tab === "images" ? "Images" : "Videos"}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Results */}
       <div className="flex-1 overflow-auto px-6 pb-6">
         {isSearching ? (
@@ -433,10 +467,24 @@ export default function SearchPage() {
               setQuery(q);
             }}
           />
-        ) : images.length === 0 ? (
-          <NoResultsState onClearFilters={clearFilters} />
+        ) : mediaTab === "videos" ? (
+          videoResults.length === 0 ? (
+            <NoResultsState onClearFilters={clearFilters} />
+          ) : (
+            <ResultsGrid images={videoResults} />
+          )
+        ) : mediaTab === "images" ? (
+          images.length === 0 ? (
+            <NoResultsState onClearFilters={clearFilters} />
+          ) : (
+            <ResultsGrid images={images} />
+          )
         ) : (
-          <ResultsGrid images={images} />
+          images.length === 0 && videoResults.length === 0 ? (
+            <NoResultsState onClearFilters={clearFilters} />
+          ) : (
+            <ResultsGrid images={[...images, ...videoResults]} />
+          )
         )}
       </div>
 

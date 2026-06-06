@@ -1,6 +1,6 @@
 import { Search, Users, Heart, FolderOpen, Bookmark, Database, Settings, ChevronLeft } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
-import { useApp } from "@/contexts/AppContext";
+import { useApp } from "@/contexts/useApp";
 import {
   Sidebar,
   SidebarContent,
@@ -10,8 +10,8 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarFooter,
-  useSidebar,
 } from "@/components/ui/sidebar";
+import { useSidebar } from "@/hooks/useSidebar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 

@@ -3,7 +3,7 @@ import { Database, FolderOpen, Users, Image, Clock, HardDrive, RefreshCw, Plus, 
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useApp } from "@/contexts/AppContext";
+import { useApp } from "@/contexts/useApp";
 import { getStorageSummary } from "@/lib/api";
 
 export default function IndexPage() {

@@ -1,6 +1,6 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { toast } from "@/components/ui/sonner";
-import { type AppSettings, type CollectionInfo, type FolderInfo, type ImageResult, type ModelInfo, type PersonInfo, type SavedSearch } from "@/types/app";
+import React, { createContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { toast } from "sonner";
+import { type AppSettings, type CollectionInfo, type FolderInfo, type ImageResult, type ModelInfo, type PersonInfo, type SavedSearch, type VideoResult } from "@/types/app";
 import type { PersonMergeResult } from "@/lib/api";
 import * as api from "@/lib/api";
 
@@ -41,12 +41,14 @@ interface AppState {
   folders: FolderInfo[];
   people: PersonInfo[];
   images: ImageResult[];
+  videoResults: VideoResult[];
   favorites: ImageResult[];
   collections: CollectionInfo[];
   savedSearches: SavedSearch[];
   indexingStatus: IndexingStatus;
   lastIndexedTime: string | null;
   totalIndexedImages: number;
+  totalIndexedVideos: number;
   isHydrating: boolean;
   isWorking: boolean;
   busyMessage: string | null;
@@ -75,13 +77,14 @@ interface AppContextType extends AppState {
   saveSearch: (name: string, query: string, filters: Record<string, unknown>) => Promise<void>;
   deleteSavedSearch: (id: string) => Promise<void>;
   searchImages: (query: string, filters?: SearchFilters) => Promise<ImageResult[]>;
+  searchVideos: (query: string) => Promise<VideoResult[]>;
   searchSimilarImages: (imageId: string | number) => Promise<ImageResult[]>;
   searchImagesByFile: (file: File) => Promise<ImageResult[]>;
   refreshData: (options?: { showLoader?: boolean }) => Promise<void>;
   updateSettings: (changes: Partial<AppSettings>) => Promise<AppSettings>;
 }
 
-const AppContext = createContext<AppContextType | null>(null);
+export const AppContext = createContext<AppContextType | null>(null);
 const UI_STATE_KEY = "glimpse-one-ui-state";
 
 /**
@@ -181,12 +184,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     folders: [],
     people: [],
     images: [],
+    videoResults: [],
     favorites: [],
     collections: [],
     savedSearches: [],
     indexingStatus: { phase: "idle", progress: 0, total: 0, processed: 0, facesDetected: 0, skipped: 0 },
     lastIndexedTime: null,
     totalIndexedImages: 0,
+    totalIndexedVideos: 0,
     isHydrating: true,
     isWorking: false,
     busyMessage: null,
@@ -268,6 +273,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const indexingStatus = summaryResult.status === "fulfilled" ? summaryResult.value.indexingStatus : prev.indexingStatus;
       const lastIndexedTime = summaryResult.status === "fulfilled" ? summaryResult.value.lastIndexedTime : prev.lastIndexedTime;
       const totalIndexedImages = summaryResult.status === "fulfilled" ? summaryResult.value.totalIndexedImages : prev.totalIndexedImages;
+      const totalIndexedVideos = summaryResult.status === "fulfilled" ? summaryResult.value.totalIndexedVideos : prev.totalIndexedVideos;
 
       const onboarding = deriveOnboardingState(
         activeModel,
@@ -294,6 +300,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         indexingStatus,
         lastIndexedTime,
         totalIndexedImages,
+        totalIndexedVideos,
       };
     });
   }, [hideOnboardingWhileIndexing]);
@@ -802,6 +809,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
    * Executes an image search with specific filters.
    */
   const searchImages = useCallback(async (query: string, filters?: SearchFilters) => {
+    const modelId = state.activeModel?.id === "xclip-video-b32" ? "clip-vit-b32" : state.activeModel?.id;
     try {
       const results = await api.searchImages({
         query,
@@ -810,7 +818,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         facePresence: filters?.facePresence ?? "any",
         people: filters?.people ?? [],
         facePhotoPath: filters?.facePhotoPath ?? null,
-        modelId: state.activeModel?.id ?? undefined,
+        modelId,
         page: 1,
         pageSize: 100,
       });
@@ -821,6 +829,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       throw error;
     }
   }, [state.activeModel?.id]);
+
+  /**
+   * Searches videos by text query.
+   */
+  const searchVideosFn = useCallback(async (query: string) => {
+    try {
+      const response = await api.searchVideos({ query });
+      setState((prev) => ({ ...prev, videoResults: response.results }));
+      return response.results;
+    } catch {
+      setState((prev) => ({ ...prev, videoResults: [] }));
+      return [];
+    }
+  }, []);
 
   /**
    * Searches for images similar to a specific indexed image.
@@ -882,6 +904,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       saveSearch,
       deleteSavedSearch,
       searchImages,
+      searchVideos: searchVideosFn,
       searchSimilarImages,
       searchImagesByFile,
       refreshData,
@@ -892,11 +915,4 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 }
 
-/**
- * Custom hook to access the application context.
- */
-export function useApp() {
-  const ctx = useContext(AppContext);
-  if (!ctx) throw new Error("useApp must be used within AppProvider");
-  return ctx;
-}
+

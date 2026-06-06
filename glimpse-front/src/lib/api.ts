@@ -6,9 +6,11 @@ import type {
   ModelInfo,
   PersonInfo,
   SavedSearch,
+  VideoResult,
 } from "@/types/app";
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
+const API_BASE =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 const DEFAULT_INDEX_BATCH_SIZE = 32;
 const SIGLIP2_LARGE_MODEL_ID = "siglip2-large-patch16-384";
 const SIGLIP2_LARGE_BATCH_SIZE = 8;
@@ -20,7 +22,17 @@ export function getDefaultIndexBatchSize(modelId?: string | null): number {
   return DEFAULT_INDEX_BATCH_SIZE;
 }
 
-type IndexingPhase = "idle" | "scanning" | "embeddings" | "faces" | "clustering" | "thumbnails" | "writing" | "cancelling" | "cancelled" | "complete";
+type IndexingPhase =
+  | "idle"
+  | "scanning"
+  | "embeddings"
+  | "faces"
+  | "clustering"
+  | "thumbnails"
+  | "writing"
+  | "cancelling"
+  | "cancelled"
+  | "complete";
 
 export interface IndexingStatus {
   phase: IndexingPhase;
@@ -39,6 +51,7 @@ export interface IndexSummary {
   indexingStatus: IndexingStatus;
   lastIndexedTime: string | null;
   totalIndexedImages: number;
+  totalIndexedVideos: number;
   totalPeople: number;
   totalFolders: number;
   indexedPaths: string[];
@@ -97,7 +110,10 @@ export interface SearchRequestPayload {
   folders?: string[];
   dateRange?: "any" | "today" | "last-7-days" | "last-30-days" | "this-year";
   facePresence?: "any" | "faces" | "no-faces";
-  people?: Array<{ id: number; preference: "must_include" | "prefer" | "exclude" }>;
+  people?: Array<{
+    id: number;
+    preference: "must_include" | "prefer" | "exclude";
+  }>;
   facePhotoPath?: string | null;
   page?: number;
   pageSize?: number;
@@ -119,7 +135,10 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     let detail = response.statusText;
     try {
       const body = await response.json();
-      detail = typeof body?.detail === "string" ? body.detail : JSON.stringify(body?.detail ?? body);
+      detail =
+        typeof body?.detail === "string"
+          ? body.detail
+          : JSON.stringify(body?.detail ?? body);
     } catch {
       // Ignore JSON parsing errors on failure bodies.
     }
@@ -132,6 +151,8 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
 
   return response.json() as Promise<T>;
 }
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 function mapModel(raw: any): ModelInfo {
   return {
@@ -154,7 +175,9 @@ function mapFolder(raw: any): FolderInfo {
     imageCount: Number(raw.imageCount ?? raw.image_count ?? 0),
     lastScanTime: String(raw.lastScanTime ?? raw.last_scan_time ?? ""),
     status: (raw.status ?? "ready") as FolderInfo["status"],
-    includeSubfolders: Boolean(raw.includeSubfolders ?? raw.include_subfolders ?? true),
+    includeSubfolders: Boolean(
+      raw.includeSubfolders ?? raw.include_subfolders ?? true,
+    ),
   };
 }
 
@@ -184,8 +207,13 @@ function mapImage(raw: any): ImageResult {
     isFavorite: Boolean(raw.isFavorite ?? raw.is_favorite ?? false),
     faceCount: Number(raw.faceCount ?? raw.face_count ?? 0),
     people: Array.isArray(raw.people) ? raw.people.map(String) : [],
-    collections: Array.isArray(raw.collections) ? raw.collections.map(String) : [],
-    score: raw.score !== undefined && raw.score !== null ? Number(raw.score) : undefined,
+    collections: Array.isArray(raw.collections)
+      ? raw.collections.map(String)
+      : [],
+    score:
+      raw.score !== undefined && raw.score !== null
+        ? Number(raw.score)
+        : undefined,
   };
 }
 
@@ -195,8 +223,14 @@ function mapCollection(raw: any): CollectionInfo {
     name: String(raw.name),
     description: raw.description ?? undefined,
     imageCount: Number(raw.imageCount ?? raw.image_count ?? 0),
-    previewUrls: Array.isArray(raw.previewUrls) ? raw.previewUrls.map(String) : [],
-    modifiedDate: String(raw.modifiedDate ?? raw.modified_date ?? new Date().toISOString().slice(0, 10)),
+    previewUrls: Array.isArray(raw.previewUrls)
+      ? raw.previewUrls.map(String)
+      : [],
+    modifiedDate: String(
+      raw.modifiedDate ??
+        raw.modified_date ??
+        new Date().toISOString().slice(0, 10),
+    ),
   };
 }
 
@@ -223,6 +257,33 @@ function mapIndexingStatus(raw: any): IndexingStatus {
   };
 }
 
+function mapVideoResult(raw: any): VideoResult {
+  return {
+    id: String(raw.id ?? raw.videoId),
+    videoId: Number(raw.videoId),
+    url: String(raw.url),
+    thumbnailUrl: raw.thumbnailUrl ? String(raw.thumbnailUrl) : undefined,
+    path: raw.path ? String(raw.path) : undefined,
+    filename: String(raw.filename ?? ""),
+    folder: String(raw.folder ?? ""),
+    dateTaken: raw.dateTaken ?? null,
+    width: raw.width != null ? Number(raw.width) : null,
+    height: raw.height != null ? Number(raw.height) : null,
+    duration: raw.duration != null ? Number(raw.duration) : null,
+    score: raw.score != null ? Number(raw.score) : undefined,
+    mediaType: "video",
+  };
+}
+
+export interface VideoSearchResponse {
+  query: string;
+  page: number;
+  pageSize: number;
+  totalResults: number;
+  totalPages: number;
+  results: VideoResult[];
+}
+
 function mapIndexSummary(raw: any): IndexSummary {
   return {
     activeModel: raw.activeModel ? mapModel(raw.activeModel) : null,
@@ -230,9 +291,12 @@ function mapIndexSummary(raw: any): IndexSummary {
     indexingStatus: mapIndexingStatus(raw.indexingStatus ?? {}),
     lastIndexedTime: raw.lastIndexedTime ?? null,
     totalIndexedImages: Number(raw.totalIndexedImages ?? 0),
+    totalIndexedVideos: Number(raw.totalIndexedVideos ?? 0),
     totalPeople: Number(raw.totalPeople ?? 0),
     totalFolders: Number(raw.totalFolders ?? 0),
-    indexedPaths: Array.isArray(raw.indexedPaths) ? raw.indexedPaths.map(String) : [],
+    indexedPaths: Array.isArray(raw.indexedPaths)
+      ? raw.indexedPaths.map(String)
+      : [],
   };
 }
 
@@ -249,14 +313,20 @@ export async function getIndexStatus(): Promise<IndexingStatus> {
 }
 
 export async function downloadModel(modelId: string): Promise<ModelInfo> {
-  return mapModel(await apiRequest<any>("/api/index/models/download", {
-    method: "POST",
-    body: JSON.stringify({ modelId }),
-  }));
+  return mapModel(
+    await apiRequest<any>("/api/index/models/download", {
+      method: "POST",
+      body: JSON.stringify({ modelId }),
+    }),
+  );
 }
 
-export async function getModelDownloadStatus(modelId: string): Promise<ModelDownloadStatus> {
-  const raw = await apiRequest<any>(`/api/index/models/download-status/${modelId}`);
+export async function getModelDownloadStatus(
+  modelId: string,
+): Promise<ModelDownloadStatus> {
+  const raw = await apiRequest<any>(
+    `/api/index/models/download-status/${modelId}`,
+  );
   return {
     modelId: String(raw.modelId ?? modelId),
     status: raw.status,
@@ -268,10 +338,12 @@ export async function getModelDownloadStatus(modelId: string): Promise<ModelDown
 }
 
 export async function activateModel(modelId: string): Promise<ModelInfo> {
-  return mapModel(await apiRequest<any>("/api/index/models/activate", {
-    method: "POST",
-    body: JSON.stringify({ modelId }),
-  }));
+  return mapModel(
+    await apiRequest<any>("/api/index/models/activate", {
+      method: "POST",
+      body: JSON.stringify({ modelId }),
+    }),
+  );
 }
 
 export async function deleteModel(modelId: string): Promise<void> {
@@ -282,14 +354,30 @@ export async function deleteModel(modelId: string): Promise<void> {
 
 function mapAppSettings(raw: any): AppSettings {
   return {
-    rememberLastPage: Boolean(raw.rememberLastPage ?? DEFAULT_APP_SETTINGS.rememberLastPage),
-    confirmDestructiveActions: Boolean(raw.confirmDestructiveActions ?? DEFAULT_APP_SETTINGS.confirmDestructiveActions),
-    doubleClickBehavior: raw.doubleClickBehavior === "external" ? "external" : "viewer",
-    includeSubfoldersByDefault: Boolean(raw.includeSubfoldersByDefault ?? DEFAULT_APP_SETTINGS.includeSubfoldersByDefault),
-    skipHiddenFolders: Boolean(raw.skipHiddenFolders ?? DEFAULT_APP_SETTINGS.skipHiddenFolders),
-    faceDetectionEnabled: Boolean(raw.faceDetectionEnabled ?? DEFAULT_APP_SETTINGS.faceDetectionEnabled),
-    compactSidebar: Boolean(raw.compactSidebar ?? DEFAULT_APP_SETTINGS.compactSidebar),
-    thumbnailDensity: raw.thumbnailDensity === "compact" ? "compact" : "comfortable",
+    rememberLastPage: Boolean(
+      raw.rememberLastPage ?? DEFAULT_APP_SETTINGS.rememberLastPage,
+    ),
+    confirmDestructiveActions: Boolean(
+      raw.confirmDestructiveActions ??
+      DEFAULT_APP_SETTINGS.confirmDestructiveActions,
+    ),
+    doubleClickBehavior:
+      raw.doubleClickBehavior === "external" ? "external" : "viewer",
+    includeSubfoldersByDefault: Boolean(
+      raw.includeSubfoldersByDefault ??
+      DEFAULT_APP_SETTINGS.includeSubfoldersByDefault,
+    ),
+    skipHiddenFolders: Boolean(
+      raw.skipHiddenFolders ?? DEFAULT_APP_SETTINGS.skipHiddenFolders,
+    ),
+    faceDetectionEnabled: Boolean(
+      raw.faceDetectionEnabled ?? DEFAULT_APP_SETTINGS.faceDetectionEnabled,
+    ),
+    compactSidebar: Boolean(
+      raw.compactSidebar ?? DEFAULT_APP_SETTINGS.compactSidebar,
+    ),
+    thumbnailDensity:
+      raw.thumbnailDensity === "compact" ? "compact" : "comfortable",
   };
 }
 
@@ -297,34 +385,47 @@ export async function getAppSettings(): Promise<AppSettings> {
   return mapAppSettings(await apiRequest<any>("/api/settings/"));
 }
 
-export async function updateAppSettings(changes: Partial<AppSettings>): Promise<AppSettings> {
-  return mapAppSettings(await apiRequest<any>("/api/settings/", {
-    method: "PATCH",
-    body: JSON.stringify(changes),
-  }));
+export async function updateAppSettings(
+  changes: Partial<AppSettings>,
+): Promise<AppSettings> {
+  return mapAppSettings(
+    await apiRequest<any>("/api/settings/", {
+      method: "PATCH",
+      body: JSON.stringify(changes),
+    }),
+  );
 }
 
 export async function getFolders(): Promise<FolderInfo[]> {
   return (await apiRequest<any[]>("/api/folders/")).map(mapFolder);
 }
 
-export async function createFolder(path: string, includeSubfolders: boolean): Promise<FolderInfo> {
-  return mapFolder(await apiRequest<any>("/api/folders/", {
-    method: "POST",
-    body: JSON.stringify({
-      path,
-      include_subfolders: includeSubfolders,
-      image_count: 0,
-      status: "ready",
+export async function createFolder(
+  path: string,
+  includeSubfolders: boolean,
+): Promise<FolderInfo> {
+  return mapFolder(
+    await apiRequest<any>("/api/folders/", {
+      method: "POST",
+      body: JSON.stringify({
+        path,
+        include_subfolders: includeSubfolders,
+        image_count: 0,
+        status: "ready",
+      }),
     }),
-  }));
+  );
 }
 
-export async function pickFolder(includeSubfolders: boolean): Promise<FolderInfo> {
-  return mapFolder(await apiRequest<any>("/api/folders/pick", {
-    method: "POST",
-    body: JSON.stringify({ includeSubfolders }),
-  }));
+export async function pickFolder(
+  includeSubfolders: boolean,
+): Promise<FolderInfo> {
+  return mapFolder(
+    await apiRequest<any>("/api/folders/pick", {
+      method: "POST",
+      body: JSON.stringify({ includeSubfolders }),
+    }),
+  );
 }
 
 export async function importImages(): Promise<ImportedImagesResult> {
@@ -367,13 +468,17 @@ export async function startIndexing(payload: {
 }
 
 export async function cancelIndexing(): Promise<IndexingStatus> {
-  return mapIndexingStatus(await apiRequest<any>("/api/index/cancel", {
-    method: "POST",
-    body: JSON.stringify({}),
-  }));
+  return mapIndexingStatus(
+    await apiRequest<any>("/api/index/cancel", {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+  );
 }
 
-export async function searchImages(payload: SearchRequestPayload): Promise<ImageResult[]> {
+export async function searchImages(
+  payload: SearchRequestPayload,
+): Promise<ImageResult[]> {
   const raw = await apiRequest<any>("/api/search/", {
     method: "POST",
     body: JSON.stringify({
@@ -391,20 +496,55 @@ export async function searchImages(payload: SearchRequestPayload): Promise<Image
   return Array.isArray(raw.results) ? raw.results.map(mapImage) : [];
 }
 
-export async function getSimilarImages(imageId: string | number, limit = 24): Promise<ImageResult[]> {
-  return (await apiRequest<any[]>(`/api/search/similar/${imageId}?limit=${limit}`)).map(mapImage);
+export async function searchVideos(payload: {
+  query: string;
+  page?: number;
+  pageSize?: number;
+}): Promise<VideoSearchResponse> {
+  const raw = await apiRequest<any>("/api/search/videos", {
+    method: "POST",
+    body: JSON.stringify({
+      query: payload.query,
+      page: payload.page ?? 1,
+      pageSize: payload.pageSize ?? 50,
+    }),
+  });
+  return {
+    query: String(raw.query ?? ""),
+    page: Number(raw.page ?? 1),
+    pageSize: Number(raw.pageSize ?? 50),
+    totalResults: Number(raw.totalResults ?? 0),
+    totalPages: Number(raw.totalPages ?? 0),
+    results: Array.isArray(raw.results) ? raw.results.map(mapVideoResult) : [],
+  };
 }
 
-export async function searchByImageFile(file: File, limit = 24): Promise<ImageResult[]> {
+export async function getSimilarImages(
+  imageId: string | number,
+  limit = 24,
+): Promise<ImageResult[]> {
+  return (
+    await apiRequest<any[]>(`/api/search/similar/${imageId}?limit=${limit}`)
+  ).map(mapImage);
+}
+
+export async function searchByImageFile(
+  file: File,
+  limit = 24,
+): Promise<ImageResult[]> {
   const body = new FormData();
   body.append("file", file);
-  return (await apiRequest<any[]>(`/api/search/by-image?limit=${limit}`, {
-    method: "POST",
-    body,
-  })).map(mapImage);
+  return (
+    await apiRequest<any[]>(`/api/search/by-image?limit=${limit}`, {
+      method: "POST",
+      body,
+    })
+  ).map(mapImage);
 }
 
-export async function uploadFaceSearchPhoto(file: File): Promise<{ path: string; filename: string }> {
+export async function uploadFaceSearchPhoto(
+  file: File,
+): Promise<{ path: string; filename: string }> {
   const body = new FormData();
   body.append("file", file);
   const raw = await apiRequest<any>("/api/search/face-photo", {
@@ -418,17 +558,24 @@ export async function uploadFaceSearchPhoto(file: File): Promise<{ path: string;
 }
 
 export async function getFavorites(): Promise<ImageResult[]> {
-  return (await apiRequest<any[]>("/api/images/indexed?favorite=true")).map(mapImage);
+  return (await apiRequest<any[]>("/api/images/indexed?favorite=true")).map(
+    mapImage,
+  );
 }
 
-export async function toggleFavorite(imageId: string, isFavorite: boolean): Promise<void> {
+export async function toggleFavorite(
+  imageId: string,
+  isFavorite: boolean,
+): Promise<void> {
   await apiRequest(`/api/images/indexed/${imageId}/favorite`, {
     method: "PATCH",
     body: JSON.stringify({ isFavorite }),
   });
 }
 
-export async function openImageExternally(imageId: string | number): Promise<void> {
+export async function openImageExternally(
+  imageId: string | number,
+): Promise<void> {
   await apiRequest(`/api/images/indexed/${imageId}/open-external`, {
     method: "POST",
     body: JSON.stringify({}),
@@ -436,17 +583,25 @@ export async function openImageExternally(imageId: string | number): Promise<voi
 }
 
 export async function getPeople(limit = 1000): Promise<PersonInfo[]> {
-  return (await apiRequest<any[]>(`/api/people/?limit=${limit}`)).map(mapPerson);
+  return (await apiRequest<any[]>(`/api/people/?limit=${limit}`)).map(
+    mapPerson,
+  );
 }
 
-export async function renamePerson(personId: string, name: string): Promise<void> {
+export async function renamePerson(
+  personId: string,
+  name: string,
+): Promise<void> {
   await apiRequest(`/api/people/${personId}`, {
     method: "PATCH",
     body: JSON.stringify({ name }),
   });
 }
 
-export async function mergePeople(targetPersonId: string, sourcePersonId: string): Promise<PersonMergeResult> {
+export async function mergePeople(
+  targetPersonId: string,
+  sourcePersonId: string,
+): Promise<PersonMergeResult> {
   const raw = await apiRequest<any>(`/api/people/${targetPersonId}/merge`, {
     method: "POST",
     body: JSON.stringify({ sourcePersonId: Number(sourcePersonId) }),
@@ -460,16 +615,25 @@ export async function mergePeople(targetPersonId: string, sourcePersonId: string
   };
 }
 
-export async function getPersonImages(personId: string, options?: { skip?: number; limit?: number }): Promise<ImageResult[]> {
+export async function getPersonImages(
+  personId: string,
+  options?: { skip?: number; limit?: number },
+): Promise<ImageResult[]> {
   const params = new URLSearchParams();
   if (options?.skip !== undefined) params.set("skip", String(options.skip));
   if (options?.limit !== undefined) params.set("limit", String(options.limit));
   const query = params.toString();
-  return (await apiRequest<any[]>(`/api/people/${personId}/images${query ? `?${query}` : ""}`)).map(mapImage);
+  return (
+    await apiRequest<any[]>(
+      `/api/people/${personId}/images${query ? `?${query}` : ""}`,
+    )
+  ).map(mapImage);
 }
 
 export async function getCollections(): Promise<CollectionInfo[]> {
-  const collections = (await apiRequest<any[]>("/api/collections/")).map(mapCollection);
+  const collections = (await apiRequest<any[]>("/api/collections/")).map(
+    mapCollection,
+  );
   return Promise.all(
     collections.map(async (collection) => {
       if (collection.previewUrls.length > 0 || collection.imageCount === 0) {
@@ -480,7 +644,9 @@ export async function getCollections(): Promise<CollectionInfo[]> {
         return {
           ...collection,
           imageCount: images.length,
-          previewUrls: images.slice(0, 4).map((image) => image.thumbnailUrl ?? image.url),
+          previewUrls: images
+            .slice(0, 4)
+            .map((image) => image.thumbnailUrl ?? image.url),
         };
       } catch {
         return collection;
@@ -489,37 +655,53 @@ export async function getCollections(): Promise<CollectionInfo[]> {
   );
 }
 
-export async function createCollection(name: string, description?: string): Promise<CollectionInfo> {
-  return mapCollection(await apiRequest<any>("/api/collections/", {
-    method: "POST",
-    body: JSON.stringify({
-      name,
-      description,
-      image_count: 0,
-      modified_date: new Date().toISOString(),
+export async function createCollection(
+  name: string,
+  description?: string,
+): Promise<CollectionInfo> {
+  return mapCollection(
+    await apiRequest<any>("/api/collections/", {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        description,
+        image_count: 0,
+        modified_date: new Date().toISOString(),
+      }),
     }),
-  }));
+  );
 }
 
 export async function deleteCollection(collectionId: string): Promise<void> {
   await apiRequest(`/api/collections/${collectionId}`, { method: "DELETE" });
 }
 
-export async function getCollectionImages(collectionId: string): Promise<ImageResult[]> {
-  return (await apiRequest<any[]>(`/api/collections/${collectionId}/images`)).map(mapImage);
+export async function getCollectionImages(
+  collectionId: string,
+): Promise<ImageResult[]> {
+  return (
+    await apiRequest<any[]>(`/api/collections/${collectionId}/images`)
+  ).map(mapImage);
 }
 
-export async function pickCollectionImages(collectionId: string): Promise<PickCollectionImagesResult> {
-  const raw = await apiRequest<any>(`/api/collections/${collectionId}/pick-images`, {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
+export async function pickCollectionImages(
+  collectionId: string,
+): Promise<PickCollectionImagesResult> {
+  const raw = await apiRequest<any>(
+    `/api/collections/${collectionId}/pick-images`,
+    {
+      method: "POST",
+      body: JSON.stringify({}),
+    },
+  );
 
   return {
     collectionId: String(raw.collectionId ?? collectionId),
     addedCount: Number(raw.addedCount ?? 0),
     autoIndexedCount: Number(raw.autoIndexedCount ?? 0),
-    skippedPaths: Array.isArray(raw.skippedPaths) ? raw.skippedPaths.map(String) : [],
+    skippedPaths: Array.isArray(raw.skippedPaths)
+      ? raw.skippedPaths.map(String)
+      : [],
     imageCount: Number(raw.imageCount ?? 0),
   };
 }
@@ -551,16 +733,22 @@ export async function getSavedSearches(): Promise<SavedSearch[]> {
   return (await apiRequest<any[]>("/api/saved-searches/")).map(mapSavedSearch);
 }
 
-export async function createSavedSearch(name: string, query: string, filters: Record<string, unknown>): Promise<SavedSearch> {
-  return mapSavedSearch(await apiRequest<any>("/api/saved-searches/", {
-    method: "POST",
-    body: JSON.stringify({
-      name,
-      query,
-      filters,
-      last_used: new Date().toISOString().slice(0, 10),
+export async function createSavedSearch(
+  name: string,
+  query: string,
+  filters: Record<string, unknown>,
+): Promise<SavedSearch> {
+  return mapSavedSearch(
+    await apiRequest<any>("/api/saved-searches/", {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        query,
+        filters,
+        last_used: new Date().toISOString().slice(0, 10),
+      }),
     }),
-  }));
+  );
 }
 
 export async function deleteSavedSearch(searchId: string): Promise<void> {

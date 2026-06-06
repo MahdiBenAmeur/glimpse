@@ -1,8 +1,8 @@
-import { Search, Download, Check, Loader2, Trash2 } from "lucide-react";
+import { Download, Check, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { useApp } from "@/contexts/AppContext";
+import { useApp } from "@/contexts/useApp";
 
 export default function ModelSetupPage() {
   const { models, activeModel, downloadModel, setActiveModel, removeModel, setOnboardingStep, isWorking } = useApp();

@@ -4,8 +4,8 @@ import { useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { toast } from "@/components/ui/sonner";
-import { useApp } from "@/contexts/AppContext";
+import { toast } from "sonner";
+import { useApp } from "@/contexts/useApp";
 import type { ImageResult } from "@/types/app";
 import { openImageExternally } from "@/lib/api";
 

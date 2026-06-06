@@ -5,7 +5,8 @@ import { BrowserRouter, Route, Routes, Navigate, useLocation } from "react-route
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { AppProvider, useApp } from "@/contexts/AppContext";
+import { AppProvider } from "@/contexts/AppContext";
+import { useApp } from "@/contexts/useApp";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { AppLayout } from "@/components/layout/AppLayout";
 import ModelSetupPage from "@/pages/onboarding/ModelSetupPage";

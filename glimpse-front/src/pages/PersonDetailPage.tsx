@@ -4,7 +4,7 @@ import { ArrowLeft, Edit2, GitMerge, Trash2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useApp } from "@/contexts/AppContext";
+import { useApp } from "@/contexts/useApp";
 import { ResultsGrid } from "@/components/search/ResultsGrid";
 import { getPersonImages } from "@/lib/api";
 import type { ImageResult } from "@/types/app";

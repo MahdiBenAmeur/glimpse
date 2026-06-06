@@ -38,6 +38,22 @@ export interface PersonInfo {
   lastSeen?: string;
 }
 
+export interface VideoResult {
+  id: string;
+  videoId: number;
+  url: string;
+  thumbnailUrl?: string;
+  path?: string;
+  filename: string;
+  folder: string;
+  dateTaken: string | null;
+  width: number | null;
+  height: number | null;
+  duration: number | null;
+  score?: number;
+  mediaType: "video";
+}
+
 export interface ImageResult {
   id: string;
   imageId?: number;
