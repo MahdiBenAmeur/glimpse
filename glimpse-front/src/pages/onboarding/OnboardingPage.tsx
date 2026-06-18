@@ -12,6 +12,7 @@ import type { ModelInfo } from "@/types/app";
 const phaseLabels: Record<string, string> = {
   scanning: "Scanning folders",
   embeddings: "Generating embeddings",
+  video_keyframes: "Extracting keyframes",
   faces: "Detecting faces",
   clustering: "Clustering faces",
   thumbnails: "Creating thumbnails",
@@ -254,58 +255,80 @@ export default function OnboardingPage() {
           {expanded === "indexing" && foldersStepDone && (
             <div className="pl-2">
               <div className="bg-card border border-border rounded-xl p-4">
-                <div className="text-center mb-4">
-                  {indexingDone ? (
-                    <div className="w-12 h-12 rounded-full bg-success/10 flex items-center justify-center mx-auto mb-2">
-                      <Check className="w-6 h-6 text-success" />
+                {indexingStatus.error && !indexingDone ? (
+                  <div className="text-center">
+                    <div className="w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center mx-auto mb-2">
+                      <AlertTriangle className="w-6 h-6 text-destructive" />
                     </div>
-                  ) : (
-                    <Loader2 className="w-7 h-7 text-primary animate-spin mx-auto mb-2" />
-                  )}
-                  <h2 className="text-sm font-medium text-foreground">
-                    {indexingDone ? "Your library is ready!" : "Building your index"}
-                  </h2>
-                </div>
-                <Progress value={indexingStatus.progress} className="h-2 mb-4" />
-                {indexingStatus.phase === "clustering" && (
-                  <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2 mb-3">
-                    <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                    <div className="text-left">
-                      <p className="text-xs font-medium text-foreground">Clustering faces</p>
-                      <p className="text-[10px] text-muted-foreground">We are clustering faces into people.</p>
+                    <h2 className="text-sm font-medium text-foreground mb-1">Indexing failed</h2>
+                    <p className="text-xs text-muted-foreground mb-4 max-w-sm mx-auto">{indexingStatus.error}</p>
+                    <Button size="sm" onClick={handleStartIndexing}>Retry indexing</Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="text-center mb-4">
+                      {indexingDone ? (
+                        <div className="w-12 h-12 rounded-full bg-success/10 flex items-center justify-center mx-auto mb-2">
+                          <Check className="w-6 h-6 text-success" />
+                        </div>
+                      ) : (
+                        <Loader2 className="w-7 h-7 text-primary animate-spin mx-auto mb-2" />
+                      )}
+                      <h2 className="text-sm font-medium text-foreground">
+                        {indexingDone ? "Your library is ready!" : "Building your index"}
+                      </h2>
                     </div>
-                  </div>
-                )}
-                <div className="space-y-1 mb-3 text-center">
-                  <span className="text-xs font-medium text-foreground">{phaseLabels[indexingStatus.phase]}</span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Image className="w-3.5 h-3.5" />
-                    <span>Total: {indexingStatus.total.toLocaleString()}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Database className="w-3.5 h-3.5" />
-                    <span>Processed: {indexingStatus.processed.toLocaleString()}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Users className="w-3.5 h-3.5" />
-                    <span>Faces: {indexingStatus.facesDetected}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <AlertTriangle className="w-3.5 h-3.5" />
-                    <span>Skipped: {indexingStatus.skipped}</span>
-                  </div>
-                </div>
-                {indexingStatus.currentFile && (
-                  <p className="text-[10px] text-muted-foreground/60 mt-3 truncate">
-                    {indexingStatus.currentFile}
-                  </p>
+                    <Progress value={indexingStatus.progress} className="h-2 mb-4" />
+                    {indexingStatus.phase === "clustering" && (
+                      <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2 mb-3">
+                        <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                        <div className="text-left">
+                          <p className="text-xs font-medium text-foreground">Clustering faces</p>
+                          <p className="text-[10px] text-muted-foreground">We are clustering faces into people.</p>
+                        </div>
+                      </div>
+                    )}
+                    <div className="space-y-1 mb-3">
+                      <div className="flex items-center justify-center gap-2">
+                        <span className="text-xs font-medium text-foreground">{phaseLabels[indexingStatus.phase]}</span>
+                        {indexingStatus.phase === "video_keyframes" && indexingStatus.keyframeCount != null && indexingStatus.keyframeCount > 0 && (
+                          <span className="text-[10px] text-muted-foreground">({indexingStatus.keyframeCount} keyframes)</span>
+                        )}
+                      </div>
+                      {indexingStatus.currentFile && indexingStatus.phase !== "clustering" && (
+                        <p className="text-[11px] text-muted-foreground/70 text-center truncate max-w-full px-2">
+                          {indexingStatus.currentFile}
+                        </p>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <Image className="w-3.5 h-3.5" />
+                        <span>Total: {indexingStatus.total.toLocaleString()}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <Database className="w-3.5 h-3.5" />
+                        <span>Processed: {indexingStatus.processed.toLocaleString()}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <Users className="w-3.5 h-3.5" />
+                        <span>Faces: {indexingStatus.facesDetected}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                        <span>Skipped: {indexingStatus.skipped}</span>
+                      </div>
+                    </div>
+                  </>
                 )}
               </div>
               <div className="flex items-center justify-center gap-3 pt-3">
-                {indexingDone ? (
-                  <Button onClick={completeOnboarding}>Start searching</Button>
+                {indexingDone || indexingStatus.error ? (
+                  indexingDone ? (
+                    <Button onClick={completeOnboarding}>Start searching</Button>
+                  ) : (
+                    <Button size="sm" onClick={handleStartIndexing}>Retry indexing</Button>
+                  )
                 ) : (
                   <>
                     <Button variant="outline" onClick={runInBackground}>Run in background</Button>

@@ -26,6 +26,7 @@ type IndexingPhase =
   | "idle"
   | "scanning"
   | "embeddings"
+  | "video_keyframes"
   | "faces"
   | "clustering"
   | "thumbnails"
@@ -41,6 +42,7 @@ export interface IndexingStatus {
   processed: number;
   facesDetected: number;
   skipped: number;
+  keyframeCount?: number;
   currentFile?: string;
   error?: string | null;
 }
@@ -253,6 +255,7 @@ function mapIndexingStatus(raw: any): IndexingStatus {
     processed: Number(raw.processed ?? 0),
     facesDetected: Number(raw.facesDetected ?? raw.faces_detected ?? 0),
     skipped: Number(raw.skipped ?? 0),
+    keyframeCount: Number(raw.keyframeCount ?? raw.keyframe_count ?? 0),
     currentFile: raw.currentFile ?? raw.current_file ?? undefined,
     error: raw.error ?? null,
   };

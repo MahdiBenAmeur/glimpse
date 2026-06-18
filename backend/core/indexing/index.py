@@ -8,12 +8,19 @@ from backend.core.indexing.index_faces import index_face_batch
 from backend.core.indexing.index_images import index_image_batch
 from backend.core.models.faces.detector import load_face_detector
 from backend.core.models.faces.embedding import load_face_embedding_model
-from backend.core.models.faces.store import finalize_face_clusters, save_face_vector_stores
+from backend.core.models.faces.store import (
+    finalize_face_clusters,
+    save_face_vector_stores,
+)
 from backend.core.models.vision_language.base import BaseEmbeddingModel
 from backend.core.models.vision_language.store import save_image_vector_store
 from backend.services.app_settings_service import load_app_settings
 from backend.services.library_state_service import load_image_vs_meta_data
-from backend.utils.image_processing import coerce_image_paths, list_image_files, prepare_images
+from backend.utils.image_processing import (
+    coerce_image_paths,
+    list_image_files,
+    prepare_images,
+)
 from backend.utils.path_utils import canonicalize_path_key
 
 
@@ -41,14 +48,17 @@ def _gpu_memory_snapshot() -> dict[str, float | int | str]:
 def _dedupe_unindexed_paths(
     valid_paths: list[Path],
     path_2_created_at: dict[Path, str | None],
+    model_id: str | None = None,
 ) -> tuple[list[Path], dict[Path, str | None], list[dict]]:
     """Remove images already present in metadata and report the skipped paths."""
-    image_vs_meta_data = load_image_vs_meta_data()
-    seen_keys = {
-        canonicalize_path_key(entry.get("image_path"))
-        for key, entry in image_vs_meta_data.items()
-        if not str(key).startswith("_") and isinstance(entry, dict) and entry.get("image_path")
-    }
+    image_vs_meta_data = load_image_vs_meta_data(model_id)
+    seen_keys: set[str] = set()
+    for key, entry in image_vs_meta_data.items():
+        if str(key).startswith("_") or not isinstance(entry, dict):
+            continue
+        image_path = entry.get("image_path")
+        if image_path:
+            seen_keys.add(canonicalize_path_key(image_path))
 
     unique_paths: list[Path] = []
     unique_created_at: dict[Path, str | None] = {}
@@ -80,11 +90,13 @@ def _dedupe_unindexed_video_paths(
     resolved_model_id = model_id or "default"
     _, meta = load_unified_vector_store(resolved_model_id)
 
-    seen_keys = {
-        canonicalize_path_key(entry.get("file_path"))
-        for key, entry in meta.items()
-        if not str(key).startswith("_") and isinstance(entry, dict) and entry.get("file_path")
-    }
+    seen_keys: set[str] = set()
+    for key, entry in meta.items():
+        if str(key).startswith("_") or not isinstance(entry, dict):
+            continue
+        file_path = entry.get("file_path")
+        if file_path:
+            seen_keys.add(canonicalize_path_key(file_path))
 
     unique_paths: list[Path] = []
     unique_created_at: dict[Path, str | None] = {}
@@ -108,7 +120,10 @@ def _chunk_paths(paths: Sequence[Path], batch_size: int) -> list[list[Path]]:
     """Split paths into fixed-size batches for incremental indexing."""
     if batch_size <= 0:
         raise ValueError("batch_size must be greater than 0")
-    return [list(paths[start : start + batch_size]) for start in range(0, len(paths), batch_size)]
+    return [
+        list(paths[start : start + batch_size])
+        for start in range(0, len(paths), batch_size)
+    ]
 
 
 def index_batch(
@@ -128,7 +143,12 @@ def index_batch(
     between expensive stages so background indexing can stop cleanly.
     """
     normalized_paths = coerce_image_paths(image_paths)
-    _log_indexing("index_batch started", input_count=len(normalized_paths), batch_size=batch_size, save_after_batch=save_after_batch)
+    _log_indexing(
+        "index_batch started",
+        input_count=len(normalized_paths),
+        batch_size=batch_size,
+        save_after_batch=save_after_batch,
+    )
     valid_paths, failed_items, path_2_created_at = prepare_images(normalized_paths)
     _log_indexing(
         "Prepared images for batch",
@@ -157,7 +177,9 @@ def index_batch(
         _log_indexing("No valid paths after image preparation")
         return stats
 
-    valid_paths, path_2_created_at, skipped_existing = _dedupe_unindexed_paths(valid_paths, path_2_created_at)
+    valid_paths, path_2_created_at, skipped_existing = _dedupe_unindexed_paths(
+        valid_paths, path_2_created_at, model_id
+    )
     stats["skipped_existing_count"] = len(skipped_existing)
     stats["skipped_existing_items"] = skipped_existing
     _log_indexing(
@@ -175,9 +197,13 @@ def index_batch(
         stats["cancelled"] = True
         return stats
 
-    _log_indexing("Loading models required for batch", model_type=type(image_model).__name__)
+    _log_indexing(
+        "Loading models required for batch", model_type=type(image_model).__name__
+    )
     image_model.load_model()
-    face_detection_enabled = bool(load_app_settings().get("face_detection_enabled", True))
+    face_detection_enabled = bool(
+        load_app_settings().get("face_detection_enabled", True)
+    )
     if face_detection_enabled:
         load_face_detector()
         load_face_embedding_model()
@@ -319,11 +345,19 @@ def index_folder(
         stats["processed_count"] += int(batch_stats.get("processed_count", 0))
         stats["failed_count"] += int(batch_stats.get("failed_count", 0))
         stats["failed_items"].extend(batch_stats.get("failed_items", []))
-        stats["image_indexed_count"] += int(batch_stats.get("image_indexing", {}).get("indexed_count", 0))
-        stats["face_indexed_count"] += int(batch_stats.get("face_indexing", {}).get("indexed_face_count", 0))
-        stats["total_people_in_batches"] += int(batch_stats.get("total_people_in_batch", 0))
+        stats["image_indexed_count"] += int(
+            batch_stats.get("image_indexing", {}).get("indexed_count", 0)
+        )
+        stats["face_indexed_count"] += int(
+            batch_stats.get("face_indexing", {}).get("indexed_face_count", 0)
+        )
+        stats["total_people_in_batches"] += int(
+            batch_stats.get("total_people_in_batch", 0)
+        )
         stats["new_people_count"] += int(batch_stats.get("new_people_count", 0))
-        stats["final_person_store_total"] = int(batch_stats.get("person_store_total", stats["final_person_store_total"]))
+        stats["final_person_store_total"] = int(
+            batch_stats.get("person_store_total", stats["final_person_store_total"])
+        )
         stats["completion_count"] += len(batch_paths)
         if stats["discovered_file_count"] > 0:
             stats["completion_percent"] = round(
@@ -339,8 +373,10 @@ def index_folder(
                 "stats": batch_stats,
             }
         )
-        print("*"*40)
-        print(f"Completed batch {batch_index}/{stats['batch_count']} - {stats['completion_percent']}% complete")
+        print("*" * 40)
+        print(
+            f"Completed batch {batch_index}/{stats['batch_count']} - {stats['completion_percent']}% complete"
+        )
         print(f"Batch stats: {batch_stats}")
 
     finalize_face_clusters()

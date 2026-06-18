@@ -14,6 +14,7 @@ interface IndexingStatus {
   facesDetected: number;
   skipped: number;
   currentFile?: string;
+  error?: string | null;
 }
 
 interface SearchFilters {
@@ -345,6 +346,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (!isIndexingPhase(nextStatus.phase)) {
           if (hideOnboardingWhileIndexing) {
             setBackgroundIndexingHidden(false);
+          }
+          if (nextStatus.error) {
+            toast.error(`Indexing failed: ${nextStatus.error}`);
           }
           await refreshData();
         }

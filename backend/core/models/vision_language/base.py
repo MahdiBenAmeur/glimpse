@@ -120,8 +120,16 @@ class BaseEmbeddingModel:
         if not self.is_model_downloaded():
             self.download_model()
 
-        self._processor = self._load_processor(local_files_only=True)
-        self._model = self._load_model(local_files_only=True).to(DEVICE)
+        try:
+            self._processor = self._load_processor(local_files_only=True)
+        except Exception:
+            self._processor = self._load_processor(local_files_only=False)
+
+        try:
+            self._model = self._load_model(local_files_only=True).to(DEVICE)
+        except Exception:
+            self._model = self._load_model(local_files_only=False).to(DEVICE)
+
         self._model.eval()
         return self._processor, self._model
 

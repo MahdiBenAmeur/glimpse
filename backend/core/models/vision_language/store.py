@@ -1,14 +1,19 @@
-import faiss
-import numpy as np
+import json
 from pathlib import Path
 from typing import Any
-import json
 
-from backend.config import IMAGE_META_PATH, IMAGE_VS_PATH, model_scoped_vs_path
+import faiss
+import numpy as np
+
+from backend.config import IMAGE_VS_PATH, model_scoped_vs_path
 from backend.core.models.vision_language.base import BaseEmbeddingModel
 from backend.utils.path_utils import canonicalize_path, canonicalize_path_key
-from backend.utils.vector_store_utils import create_empty_index, delete_vs, load_or_init_vector_store, save_vs
-
+from backend.utils.vector_store_utils import (
+    create_empty_index,
+    delete_vs,
+    load_or_init_vector_store,
+    save_vs,
+)
 
 image_vs = None
 image_vs_meta_data = None
@@ -27,7 +32,9 @@ def reset_image_vector_store() -> None:
     image_vs_meta_data = None
 
 
-def _image_store_path(image_model: BaseEmbeddingModel | None, model_id: str | None) -> Path:
+def _image_store_path(
+    image_model: BaseEmbeddingModel | None, model_id: str | None
+) -> Path:
     """Resolve the store path: model-scoped when model_id is given, else legacy."""
     if model_id is not None:
         return model_scoped_vs_path(model_id, store_type="image")
@@ -42,7 +49,9 @@ def _resolve_image_store_paths(
     return store, store / "meta_data.json"
 
 
-def _load_saved_image_vs_metadata(image_model: BaseEmbeddingModel | None = None, model_id: str | None = None) -> dict:
+def _load_saved_image_vs_metadata(
+    image_model: BaseEmbeddingModel | None = None, model_id: str | None = None
+) -> dict:
     """Read persisted image-store metadata so the embedding dim can be recovered offline."""
     _, meta_path = _resolve_image_store_paths(image_model, model_id)
     if not meta_path.exists():
@@ -55,7 +64,64 @@ def _load_saved_image_vs_metadata(image_model: BaseEmbeddingModel | None = None,
     return loaded if isinstance(loaded, dict) else {}
 
 
-def _validate_image_store_model(meta_data: dict, image_model: BaseEmbeddingModel) -> None:
+def _index_embedding_dim(vector_store: faiss.Index | None) -> int | None:
+    """Return the embedding dimension from a loaded FAISS index when available."""
+    if vector_store is None:
+        return None
+    emb_dim = getattr(vector_store, "d", None)
+    if emb_dim is None:
+        nested_index = getattr(vector_store, "index", None)
+        emb_dim = getattr(nested_index, "d", None)
+    return int(emb_dim) if emb_dim is not None else None
+
+
+def _load_embedding_dim(
+    saved_meta_data: dict, image_model: BaseEmbeddingModel | None
+) -> int:
+    """Resolve an embedding dimension before loading/creating a vector store."""
+    saved_dim = saved_meta_data.get("_embedding_dim")
+    if saved_dim is not None:
+        return int(saved_dim)
+    if image_model is not None:
+        return image_model.get_embedding_dim()
+    return 512
+
+
+def _ensure_image_store_metadata(
+    meta_data: dict,
+    image_model: BaseEmbeddingModel | None,
+    model_id: str | None,
+    *,
+    vector_store: faiss.Index | None = None,
+) -> bool:
+    """Backfill metadata fields required by model-scoped vector stores."""
+    changed = False
+
+    if "_embedding_dim" not in meta_data:
+        emb_dim = (
+            image_model.get_embedding_dim()
+            if image_model is not None
+            else _index_embedding_dim(vector_store)
+        )
+        meta_data["_embedding_dim"] = int(emb_dim or 512)
+        changed = True
+
+    if image_model is not None and "_model_ckpt" not in meta_data:
+        meta_data["_model_ckpt"] = getattr(
+            image_model, "CKPT", image_model.__class__.__name__
+        )
+        changed = True
+
+    if model_id is not None and meta_data.get("_model_id") != model_id:
+        meta_data["_model_id"] = model_id
+        changed = True
+
+    return changed
+
+
+def _validate_image_store_model(
+    meta_data: dict, image_model: BaseEmbeddingModel
+) -> None:
     """Raise if the store metadata belongs to a different image model."""
     model_ckpt = getattr(image_model, "CKPT", image_model.__class__.__name__)
     emb_dim = image_model.get_embedding_dim()
@@ -65,9 +131,9 @@ def _validate_image_store_model(meta_data: dict, image_model: BaseEmbeddingModel
             f"Image vector store dimension mismatch: store={meta_data['_embedding_dim']} current={emb_dim}"
         )
 
-    if meta_data["_model_ckpt"] != model_ckpt:
+    if meta_data.get("_model_ckpt") != model_ckpt:
         raise ValueError(
-            f"Image vector store model mismatch: store={meta_data['_model_ckpt']} current={model_ckpt}"
+            f"Image vector store model mismatch: store={meta_data.get('_model_ckpt')} current={model_ckpt}"
         )
 
 
@@ -86,11 +152,23 @@ def load_image_vector_store(
     store_path, meta_path = _resolve_image_store_paths(image_model, model_id)
 
     if image_vs is not None and image_vs_meta_data is not None:
+        metadata_changed = _ensure_image_store_metadata(
+            image_vs_meta_data,
+            image_model,
+            model_id,
+            vector_store=image_vs,
+        )
         if image_model is not None:
             _validate_image_store_model(image_vs_meta_data, image_model)
+        if metadata_changed:
+            save_image_vector_store()
         return image_vs, image_vs_meta_data
 
-    if not store_path.exists():
+    index_path = store_path / "index.faiss"
+    store_exists = index_path.exists() and meta_path.exists()
+    store_missing = not index_path.exists() and not meta_path.exists()
+
+    if store_missing:
         if image_model is None:
             raise ValueError("Cannot create image vector store without image_model")
 
@@ -98,20 +176,38 @@ def load_image_vector_store(
             str(store_path),
             emb_dim=image_model.get_embedding_dim(),
         )
-        image_vs_meta_data["_embedding_dim"] = image_model.get_embedding_dim()
-        image_vs_meta_data["_model_ckpt"] = getattr(image_model, "CKPT", image_model.__class__.__name__)
-        if model_id is not None:
-            image_vs_meta_data["_model_id"] = model_id
+        _ensure_image_store_metadata(
+            image_vs_meta_data,
+            image_model,
+            model_id,
+            vector_store=image_vs,
+        )
         save_image_vector_store()
         return image_vs, image_vs_meta_data
 
-    saved_meta_data = _load_saved_image_vs_metadata(image_model, model_id)
-    image_vs, image_vs_meta_data = load_or_init_vector_store(
-        str(store_path),
-        emb_dim=int(saved_meta_data["_embedding_dim"]),
+    if not store_exists:
+        # Let the shared loader raise the existing, more specific incomplete-store error.
+        image_vs, image_vs_meta_data = load_or_init_vector_store(
+            str(store_path),
+            emb_dim=image_model.get_embedding_dim() if image_model is not None else 512,
+        )
+    else:
+        saved_meta_data = _load_saved_image_vs_metadata(image_model, model_id)
+        image_vs, image_vs_meta_data = load_or_init_vector_store(
+            str(store_path),
+            emb_dim=_load_embedding_dim(saved_meta_data, image_model),
+        )
+
+    metadata_changed = _ensure_image_store_metadata(
+        image_vs_meta_data,
+        image_model,
+        model_id,
+        vector_store=image_vs,
     )
     if image_model is not None:
         _validate_image_store_model(image_vs_meta_data, image_model)
+    if metadata_changed:
+        save_image_vector_store()
     return image_vs, image_vs_meta_data
 
 
@@ -178,18 +274,25 @@ def purge_image_entries(path: str | Path) -> dict[str, Any]:
     if not kept_ids:
         reset_image_vector_store()
         delete_vs(IMAGE_VS_PATH)
-        return {"removed_ids": removed_ids, "removed_count": len(removed_ids), "remaining_count": 0}
+        return {
+            "removed_ids": removed_ids,
+            "removed_count": len(removed_ids),
+            "remaining_count": 0,
+        }
 
     emb_dim = int(image_vs_meta_data["_embedding_dim"])
     rebuilt_index = create_empty_index(emb_dim)
     rebuilt_vectors: list[np.ndarray] = []
     rebuilt_ids: list[int] = []
     for image_id in kept_ids:
-        rebuilt_vectors.append(image_vs.reconstruct(int(image_id)))
+        vector = np.empty((emb_dim,), dtype=np.float32)
+        image_vs.reconstruct(int(image_id), vector)
+        rebuilt_vectors.append(vector)
         rebuilt_ids.append(int(image_id))
 
     if rebuilt_vectors:
-        rebuilt_index.add_with_ids(
+        add_with_ids = getattr(rebuilt_index, "add_with_ids")
+        add_with_ids(
             np.asarray(rebuilt_vectors, dtype="float32"),
             np.asarray(rebuilt_ids, dtype=np.int64),
         )

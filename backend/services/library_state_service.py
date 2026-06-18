@@ -1,25 +1,39 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
-from backend.config import IMAGE_META_PATH, LIBRARY_STATE_PATH, VIDEO_META_PATH
+from backend.config import (
+    IMAGE_META_PATH,
+    LIBRARY_STATE_PATH,
+    VIDEO_META_PATH,
+    model_scoped_vs_path,
+)
 from backend.core.models.vision_language.store import get_loaded_image_vs_metadata
 from backend.core.models.vision_language.video.store import get_loaded_video_vs_metadata
 from backend.utils.path_utils import canonicalize_path, canonicalize_path_key
 
 
-def load_image_vs_meta_data() -> dict[str, Any]:
+def load_image_vs_meta_data(model_id: str | None = None) -> dict[str, Any]:
     """
     Loads image metadata from disk.
     """
     loaded_meta = get_loaded_image_vs_metadata()
     if isinstance(loaded_meta, dict) and loaded_meta:
-        return loaded_meta
-    if not IMAGE_META_PATH.exists():
+        loaded_model_id = loaded_meta.get("_model_id")
+        if model_id is None or loaded_model_id == model_id:
+            return loaded_meta
+
+    meta_path = (
+        model_scoped_vs_path(model_id, "image") / "meta_data.json"
+        if model_id is not None
+        else IMAGE_META_PATH
+    )
+    if not meta_path.exists():
         return {}
     try:
-        with IMAGE_META_PATH.open("r", encoding="utf-8") as handle:
+        with meta_path.open("r", encoding="utf-8") as handle:
             loaded = json.load(handle)
     except (OSError, json.JSONDecodeError):
         return {}
@@ -62,7 +76,9 @@ def list_indexed_images() -> list[dict[str, Any]]:
                 "created_at": value.get("created_at"),
             }
         )
-    items.sort(key=lambda item: (item.get("created_at") or "", item["image_id"]), reverse=True)
+    items.sort(
+        key=lambda item: (item.get("created_at") or "", item["image_id"]), reverse=True
+    )
     return items
 
 
@@ -135,7 +151,12 @@ def get_image_state(image_id: int) -> dict[str, Any]:
     return state.get("images", {}).get(str(image_id), {})
 
 
-def update_image_state(image_id: int, *, is_favorite: bool | None = None, collection_ids: list[int] | None = None) -> dict[str, Any]:
+def update_image_state(
+    image_id: int,
+    *,
+    is_favorite: bool | None = None,
+    collection_ids: list[int] | None = None,
+) -> dict[str, Any]:
     """
     Updates the state for a specific image.
     """
@@ -147,7 +168,9 @@ def update_image_state(image_id: int, *, is_favorite: bool | None = None, collec
         current["is_favorite"] = bool(is_favorite)
 
     if collection_ids is not None:
-        current["collection_ids"] = sorted({int(collection_id) for collection_id in collection_ids})
+        current["collection_ids"] = sorted(
+            {int(collection_id) for collection_id in collection_ids}
+        )
 
     image_states[str(image_id)] = current
     save_library_state(state)
@@ -165,7 +188,10 @@ def get_image_collection_ids(image_id: int) -> list[int]:
     """
     Retrieves the collection IDs for an image.
     """
-    return [int(collection_id) for collection_id in get_image_state(image_id).get("collection_ids", [])]
+    return [
+        int(collection_id)
+        for collection_id in get_image_state(image_id).get("collection_ids", [])
+    ]
 
 
 def add_image_to_collection(image_id: int, collection_id: int) -> dict[str, Any]:
@@ -181,7 +207,9 @@ def remove_image_from_collection(image_id: int, collection_id: int) -> dict[str,
     """
     Removes an image from a collection.
     """
-    collection_ids = [cid for cid in get_image_collection_ids(image_id) if cid != int(collection_id)]
+    collection_ids = [
+        cid for cid in get_image_collection_ids(image_id) if cid != int(collection_id)
+    ]
     return update_image_state(image_id, collection_ids=collection_ids)
 
 
@@ -192,7 +220,9 @@ def get_collection_image_ids(collection_id: int) -> list[int]:
     state = load_library_state()
     result: list[int] = []
     for image_id, image_state in state.get("images", {}).items():
-        if int(collection_id) in [int(cid) for cid in image_state.get("collection_ids", [])]:
+        if int(collection_id) in [
+            int(cid) for cid in image_state.get("collection_ids", [])
+        ]:
             result.append(int(image_id))
     return sorted(result)
 

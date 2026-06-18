@@ -19,7 +19,6 @@ from backend.config import (
     MODELS_CACHE_DIR,
     PERSON_VS_PATH,
     THUMBNAIL_CACHE_DIR,
-    VECTOR_STORE_ROOT,
     VIDEO_VS_PATH,
     model_scoped_vs_path,
 )
@@ -40,7 +39,6 @@ from backend.core.models.vision_language.store import (
     reset_image_vector_store,
     save_image_vector_store,
 )
-
 from backend.db_models.database import get_session
 from backend.db_models.folder import Folder
 from backend.services.folder_service import _folder_score
@@ -56,6 +54,7 @@ IndexPhase = Literal[
     "idle",
     "scanning",
     "embeddings",
+    "video_keyframes",
     "faces",
     "clustering",
     "thumbnails",
@@ -88,6 +87,7 @@ class IndexingStatusResponse(BaseModel):
     processed: int
     facesDetected: int
     skipped: int
+    keyframeCount: int = 0
     currentFile: str | None = None
     error: str | None = None
 
@@ -174,7 +174,6 @@ MODEL_CATALOG: list[dict[str, Any]] = [
         "mediaType": "image",
         "factory": SiglipLargeEmbeddingModel,
     },
-
 ]
 _VALID_MODEL_IDS = {entry["id"] for entry in MODEL_CATALOG}
 
@@ -194,6 +193,7 @@ _index_state: dict[str, Any] = {
     "processed": 0,
     "facesDetected": 0,
     "skipped": 0,
+    "keyframeCount": 0,
     "currentFile": None,
     "error": None,
     "lastIndexedTime": None,
@@ -405,7 +405,9 @@ def get_active_model_info() -> dict[str, Any] | None:
     model_entry = _model_map.get(_active_model_id)
     if model_entry is None:
         return None
-    return _model_to_response(model_entry, active=True, media_type=model_entry.get("mediaType", "image"))
+    return _model_to_response(
+        model_entry, active=True, media_type=model_entry.get("mediaType", "image")
+    )
 
 
 def _model_to_response(
@@ -457,6 +459,10 @@ def _count_store_records(vs_path: str | Path) -> int:
     return sum(1 for key in meta_data if not str(key).startswith("_"))
 
 
+def _image_store_path_for_model(model_id: str | None) -> Path:
+    return model_scoped_vs_path(model_id, "image") if model_id else IMAGE_VS_PATH
+
+
 def _copy_state() -> dict[str, Any]:
     with _state_lock:
         return dict(_index_state)
@@ -481,6 +487,8 @@ def _reset_vector_stores() -> None:
     reset_face_vector_stores()
     if _active_model_id:
         delete_vs(str(model_scoped_vs_path(_active_model_id, "unified")))
+        delete_vs(str(model_scoped_vs_path(_active_model_id, "image")))
+        delete_vs(str(model_scoped_vs_path(_active_model_id, "video")))
     delete_vs(IMAGE_VS_PATH)
     delete_vs(VIDEO_VS_PATH)
     delete_vs(FACE_VS_PATH)
@@ -557,7 +565,9 @@ def _finish_cancelled_index_job(
         skipped=skipped_count,
         currentFile=current_file,
         error=None,
-        totalIndexedImages=_count_store_records(IMAGE_VS_PATH),
+        totalIndexedImages=_count_store_records(
+            _image_store_path_for_model(_active_model_id)
+        ),
     )
 
 
@@ -628,6 +638,12 @@ def _run_index_job(
             _reset_vector_stores()
 
         image_model = get_embedding_model(model_id)
+        if not image_model.is_model_downloaded():
+            raise RuntimeError(
+                f"Model '{model_id}' is not downloaded. "
+                "Download it from Settings > Models first."
+            )
+        image_model.load_model()
         _log_index_api(
             "Resolved image model for index job",
             model_id=model_id,
@@ -865,9 +881,7 @@ def _run_index_job(
                         )
                         return
 
-                    batch_paths = vfiles[
-                        batch_start : batch_start + batch_size
-                    ]
+                    batch_paths = vfiles[batch_start : batch_start + batch_size]
                     valid_paths, failed_items, path_2_duration, path_2_created_at = (
                         prepare_videos(batch_paths)
                     )
@@ -893,6 +907,19 @@ def _run_index_job(
                     if not valid_paths:
                         continue
 
+                    _set_state(
+                        phase="video_keyframes",
+                        progress=int(round((processed_count / total_files) * 100))
+                        if total_files
+                        else 0,
+                        total=total_files,
+                        processed=processed_count,
+                        facesDetected=faces_detected,
+                        skipped=skipped_count,
+                        keyframeCount=0,
+                        currentFile=str(valid_paths[0]),
+                    )
+
                     video_stats = index_video_batch(
                         image_model,
                         valid_paths,
@@ -900,9 +927,13 @@ def _run_index_job(
                         path_2_duration=path_2_duration,
                         model_id=model_id,
                     )
-                    video_processed += video_stats.get("indexed_count", 0)
-                    processed_count += video_stats.get("indexed_count", 0)
+                    video_keyframes = video_stats.get("indexed_count", 0)
+                    video_processed += len(valid_paths)
+                    processed_count += len(valid_paths)
                     skipped_count += video_stats.get("failed_count", 0)
+                    total_keyframes = (
+                        _index_state.get("keyframeCount", 0) + video_keyframes
+                    )
 
                     progress = (
                         int(round((processed_count / total_files) * 100))
@@ -910,12 +941,13 @@ def _run_index_job(
                         else 100
                     )
                     _set_state(
-                        phase="embeddings",
+                        phase="video_keyframes" if video_batches else "embeddings",
                         progress=progress,
                         total=total_files,
                         processed=processed_count,
                         facesDetected=faces_detected,
                         skipped=skipped_count,
+                        keyframeCount=total_keyframes,
                         currentFile=current_file,
                     )
                     _log_index_api(
@@ -978,7 +1010,9 @@ def _run_index_job(
             currentFile=None,
             error=None,
             lastIndexedTime=completed_at,
-            totalIndexedImages=_count_store_records(IMAGE_VS_PATH),
+            totalIndexedImages=_count_store_records(
+                _image_store_path_for_model(model_id)
+            ),
             totalIndexedVideos=_count_store_records(VIDEO_VS_PATH),
             mergedPeople=int(final_face_merge_stats.get("merged_person_count", 0)),
         )
@@ -1151,7 +1185,9 @@ def activate_model(payload: ActivateModelRequest) -> dict[str, Any]:
     _active_model_id = payload.modelId
     _save_active_model(_active_model_id)
     _warm_active_model(payload.modelId)
-    return _model_to_response(model_entry, active=True, media_type=model_entry.get("mediaType", "image"))
+    return _model_to_response(
+        model_entry, active=True, media_type=model_entry.get("mediaType", "image")
+    )
 
 
 @router.post("/models/download", response_model=ModelInfo)
@@ -1214,12 +1250,9 @@ def delete_model(model_id: str) -> dict[str, str]:
     if not _is_model_downloaded(model_id):
         raise HTTPException(status_code=409, detail="Model is not downloaded")
 
-    if (
-        model_id == _active_model_id
-        and (
-            _indexing_starting
-            or (_indexing_thread is not None and _indexing_thread.is_alive())
-        )
+    if model_id == _active_model_id and (
+        _indexing_starting
+        or (_indexing_thread is not None and _indexing_thread.is_alive())
     ):
         raise HTTPException(
             status_code=409,
@@ -1250,6 +1283,7 @@ def read_index_status() -> dict[str, Any]:
         "processed": state["processed"],
         "facesDetected": state["facesDetected"],
         "skipped": state["skipped"],
+        "keyframeCount": state.get("keyframeCount", 0),
         "currentFile": state["currentFile"],
         "error": state["error"],
     }
@@ -1307,7 +1341,9 @@ def read_index_summary(session: Session = Depends(get_session)) -> dict[str, Any
             "error": state["error"],
         },
         "lastIndexedTime": last_indexed_time,
-        "totalIndexedImages": _count_store_records(IMAGE_VS_PATH),
+        "totalIndexedImages": _count_store_records(
+            _image_store_path_for_model(_active_model_id)
+        ),
         "totalIndexedVideos": _count_store_records(VIDEO_VS_PATH),
         "totalPeople": _count_store_records(PERSON_VS_PATH),
         "totalFolders": len(folders),
