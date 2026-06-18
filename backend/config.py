@@ -27,12 +27,25 @@ FACE_QUERY_UPLOAD_DIR = CACHE_DIR / "face_query_uploads"
 
 
 # VECTOR STORE PATHS
+VECTOR_STORE_ROOT = DATA_DIR / "vector_stores"
 FACE_VS_PATH = DATA_DIR / "face_vector_store"
 PERSON_VS_PATH = DATA_DIR / "person_vector_store"
 IMAGE_VS_PATH = DATA_DIR / "image_vector_store"
 IMAGE_META_PATH = IMAGE_VS_PATH / "meta_data.json"
 VIDEO_VS_PATH = DATA_DIR / "video_vector_store"
 VIDEO_META_PATH = VIDEO_VS_PATH / "meta_data.json"
+
+
+def model_scoped_vs_path(model_id: str, store_type: str = "unified") -> Path:
+    """Return a model-scoped vector store directory path.
+
+    Each model gets its own namespace under VECTOR_STORE_ROOT,
+    e.g. ``vector_stores/xclip-video-b32/unified/``.
+    This ensures switching models never orphanes or invalidates data.
+    """
+    path = VECTOR_STORE_ROOT / model_id / store_type
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 # GENERAL MODEL CONFIG
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")

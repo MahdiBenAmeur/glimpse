@@ -4,7 +4,7 @@ import numpy as np
 from pathlib import Path
 from typing import Any
 
-from backend.config import VIDEO_META_PATH, VIDEO_VS_PATH
+from backend.config import VIDEO_META_PATH, VIDEO_VS_PATH, model_scoped_vs_path
 from backend.core.models.vision_language.base import BaseEmbeddingModel
 from backend.utils.path_utils import canonicalize_path, canonicalize_path_key
 from backend.utils.vector_store_utils import create_empty_index, delete_vs, load_or_init_vector_store, save_vs
@@ -26,12 +26,23 @@ def reset_video_vector_store() -> None:
     video_vs_meta_data = None
 
 
-def _load_saved_video_vs_metadata() -> dict:
+def _video_store_path(video_model: BaseEmbeddingModel | None, model_id: str | None) -> Path:
+    if model_id is not None:
+        return model_scoped_vs_path(model_id, store_type="video")
+    return VIDEO_VS_PATH
+
+
+def _load_saved_video_vs_metadata(
+    video_model: BaseEmbeddingModel | None = None,
+    model_id: str | None = None,
+) -> dict:
     """Read persisted video-store metadata so the embedding dim can be recovered offline."""
-    if not VIDEO_META_PATH.exists():
+    store_dir = _video_store_path(video_model, model_id)
+    meta_path = store_dir / "meta_data.json"
+    if not meta_path.exists():
         return {}
     try:
-        with VIDEO_META_PATH.open("r", encoding="utf-8") as handle:
+        with meta_path.open("r", encoding="utf-8") as handle:
             loaded = json.load(handle)
     except (OSError, json.JSONDecodeError):
         return {}
@@ -54,31 +65,42 @@ def _validate_video_store_model(meta_data: dict, video_model: BaseEmbeddingModel
         )
 
 
-def load_video_vector_store(video_model: BaseEmbeddingModel | None = None) -> tuple[faiss.Index, dict]:
-    """Load the cached video vector store, creating it when no saved store exists."""
+def load_video_vector_store(
+    video_model: BaseEmbeddingModel | None = None,
+    model_id: str | None = None,
+) -> tuple[faiss.Index, dict]:
+    """Load the cached video vector store, creating it when no saved store exists.
+
+    When ``model_id`` is provided the store is scoped to that model's namespace,
+    otherwise the legacy ``VIDEO_VS_PATH`` is used.
+    """
     global video_vs, video_vs_meta_data
+
+    store_dir = _video_store_path(video_model, model_id)
 
     if video_vs is not None and video_vs_meta_data is not None:
         if video_model is not None:
             _validate_video_store_model(video_vs_meta_data, video_model)
         return video_vs, video_vs_meta_data
 
-    if not VIDEO_VS_PATH.exists():
+    if not store_dir.exists():
         if video_model is None:
             raise ValueError("Cannot create video vector store without video_model")
 
         video_vs, video_vs_meta_data = load_or_init_vector_store(
-            VIDEO_VS_PATH,
+            str(store_dir),
             emb_dim=video_model.get_embedding_dim(),
         )
         video_vs_meta_data["_embedding_dim"] = video_model.get_embedding_dim()
         video_vs_meta_data["_model_ckpt"] = getattr(video_model, "CKPT", video_model.__class__.__name__)
+        if model_id is not None:
+            video_vs_meta_data["_model_id"] = model_id
         save_video_vector_store()
         return video_vs, video_vs_meta_data
 
-    saved_meta_data = _load_saved_video_vs_metadata()
+    saved_meta_data = _load_saved_video_vs_metadata(video_model, model_id)
     video_vs, video_vs_meta_data = load_or_init_vector_store(
-        VIDEO_VS_PATH,
+        str(store_dir),
         emb_dim=int(saved_meta_data["_embedding_dim"]),
     )
     if video_model is not None:
@@ -90,7 +112,12 @@ def save_video_vector_store() -> None:
     """Persist the loaded video vector store and metadata to disk."""
     if video_vs is None or video_vs_meta_data is None:
         return
-    save_vs(video_vs, video_vs_meta_data, VIDEO_VS_PATH)
+    raw_id = video_vs_meta_data.get("_model_id")
+    if isinstance(raw_id, str):
+        store = model_scoped_vs_path(raw_id, store_type="video")
+    else:
+        store = VIDEO_VS_PATH
+    save_vs(video_vs, video_vs_meta_data, str(store))
 
 
 def purge_video_entries(path: str | Path) -> dict[str, Any]:

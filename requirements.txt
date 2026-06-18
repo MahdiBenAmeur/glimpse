@@ -31,3 +31,5 @@ scikit-learn==1.8.0
 
 av>=14.0,<18.0
 python-dotenv>=1.0.0
+
+scenedetect>=1.8.0

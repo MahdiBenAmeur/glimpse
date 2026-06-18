@@ -9,9 +9,7 @@ import { AppProvider } from "@/contexts/AppContext";
 import { useApp } from "@/contexts/useApp";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { AppLayout } from "@/components/layout/AppLayout";
-import ModelSetupPage from "@/pages/onboarding/ModelSetupPage";
-import FolderSelectionPage from "@/pages/onboarding/FolderSelectionPage";
-import InitialIndexingPage from "@/pages/onboarding/InitialIndexingPage";
+import OnboardingPage from "@/pages/onboarding/OnboardingPage";
 import SearchPage from "@/pages/SearchPage";
 import PeoplePage from "@/pages/PeoplePage";
 import PersonDetailPage from "@/pages/PersonDetailPage";
@@ -35,7 +33,7 @@ function getSavedRoute() {
 }
 
 function AppRoutes() {
-  const { isFirstLaunch, onboardingStep, isHydrating, isWorking, busyMessage, showWorkingOverlay, settings } = useApp();
+  const { isFirstLaunch, isHydrating, isWorking, busyMessage, showWorkingOverlay, settings } = useApp();
   const location = useLocation();
 
   useEffect(() => {
@@ -50,9 +48,7 @@ function AppRoutes() {
   }
 
   if (isFirstLaunch) {
-    if (onboardingStep === 0) return <><ModelSetupPage />{isWorking && showWorkingOverlay && <WorkingOverlay message={busyMessage} />}</>;
-    if (onboardingStep === 1) return <><FolderSelectionPage />{isWorking && showWorkingOverlay && <WorkingOverlay message={busyMessage} />}</>;
-    if (onboardingStep === 2) return <><InitialIndexingPage />{isWorking && showWorkingOverlay && <WorkingOverlay message={busyMessage} />}</>;
+    return <><OnboardingPage />{isWorking && showWorkingOverlay && <WorkingOverlay message={busyMessage} />}</>;
   }
 
   return (

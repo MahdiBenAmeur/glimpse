@@ -142,7 +142,7 @@ function deriveOnboardingState(
 }
 
 /**
- * Updates the model list to set a specific model as active.
+ * Updates the model list to set a specific model as the single active model.
  */
 function markModelAsActive(models: ModelInfo[], modelId: string) {
   const nextModels = models.map((model) => {
@@ -263,7 +263,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ? summaryResult.value.models
           : prev.models;
 
-      const activeModel = summaryResult.status === "fulfilled" ? summaryResult.value.activeModel : prev.activeModel;
+      const activeModel = summaryResult.status === "fulfilled"
+        ? (summaryResult.value.activeModel ?? null)
+        : prev.activeModel;
       const folders = foldersResult.status === "fulfilled" ? foldersResult.value : prev.folders;
       const people = peopleResult.status === "fulfilled" ? peopleResult.value : prev.people;
       const collections = collectionsResult.status === "fulfilled" ? collectionsResult.value : prev.collections;
@@ -441,7 +443,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         setBackgroundIndexingHidden(false);
         setState((prev) => {
-          const { models, activeModel } = markModelAsActive(prev.models, id);
+          const { models, activeModel: nextActive } = markModelAsActive(prev.models, id);
           const nextIndexingStatus: IndexingStatus = {
             phase: "scanning",
             progress: 0,
@@ -452,7 +454,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             currentFile: currentFolders[0] ?? prev.indexingStatus.currentFile,
           };
           const onboarding = deriveOnboardingState(
-            activeModel,
+            nextActive,
             prev.folders,
             nextIndexingStatus,
             prev.lastIndexedTime,
@@ -463,7 +465,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return {
             ...prev,
             models,
-            activeModel,
+            activeModel: nextActive,
             indexingStatus: nextIndexingStatus,
             isFirstLaunch: onboarding.isFirstLaunch,
             onboardingStep: onboarding.onboardingStep,
@@ -480,9 +482,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           });
 
           setState((prev) => {
-            const { models, activeModel } = markModelAsActive(prev.models, id);
+            const { models, activeModel: nextActive } = markModelAsActive(prev.models, id);
             const onboarding = deriveOnboardingState(
-              activeModel,
+              nextActive,
               prev.folders,
               summary.indexingStatus,
               summary.lastIndexedTime,
@@ -493,7 +495,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             return {
               ...prev,
               models,
-              activeModel,
+              activeModel: nextActive,
               indexingStatus: summary.indexingStatus,
               lastIndexedTime: summary.lastIndexedTime,
               totalIndexedImages: summary.totalIndexedImages,
@@ -809,7 +811,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
    * Executes an image search with specific filters.
    */
   const searchImages = useCallback(async (query: string, filters?: SearchFilters) => {
-    const modelId = state.activeModel?.id === "xclip-video-b32" ? "clip-vit-b32" : state.activeModel?.id;
+    const modelId = state.activeModel?.id ?? null;
     try {
       const results = await api.searchImages({
         query,

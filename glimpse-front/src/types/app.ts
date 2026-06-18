@@ -6,6 +6,7 @@ export interface ModelInfo {
   speed: "fast" | "moderate" | "slow";
   diskSize: string;
   suitability: string;
+  mediaType: "image" | "video" | "unified";
   status: "not_installed" | "downloading" | "installed" | "active";
   downloadProgress?: number;
 }

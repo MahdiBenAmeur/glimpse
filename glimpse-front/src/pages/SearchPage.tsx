@@ -28,6 +28,7 @@ type SearchRouteState = {
   };
   similarImageId?: string | number;
   similarSourceLabel?: string;
+  personFilter?: { id: number; preference: "must_include" | "prefer" | "exclude" };
 } | null;
 
 type ActiveFilterChip = {
@@ -117,6 +118,7 @@ export default function SearchPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
@@ -145,6 +147,21 @@ export default function SearchPage() {
   const indexFresh = lastIndexedTime
     ? (Date.now() - new Date(lastIndexedTime).getTime()) < 86400000
     : false;
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
+      }
+      event.preventDefault();
+      searchInputRef.current?.focus();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const handleSearch = async () => {
     if (!query.trim() && !searchFilterRequest.facePhotoPath) return;
@@ -259,6 +276,28 @@ export default function SearchPage() {
         return;
       }
 
+      if (state.personFilter) {
+        setQuery("");
+        setSearchFilterRequest((current) => ({
+          ...current,
+          people: [state.personFilter],
+        }));
+        setHasSearched(true);
+        setIsSearching(true);
+        try {
+          await Promise.all([
+            searchImages("", { ...searchFilterRequest, people: [state.personFilter] }),
+            searchVideos(""),
+          ]);
+        } finally {
+          if (!cancelled) {
+            setIsSearching(false);
+            navigate(location.pathname, { replace: true, state: null });
+          }
+        }
+        return;
+      }
+
       if (state.similarImageId !== undefined) {
         setQuery(`Similar to ${state.similarSourceLabel ?? "image"}`);
         setHasSearched(true);
@@ -281,7 +320,7 @@ export default function SearchPage() {
     return () => {
       cancelled = true;
     };
-  }, [location.pathname, location.state, navigate, peopleLookup, searchImages, searchSimilarImages, searchVideos]);
+  }, [location.pathname, location.state, navigate, peopleLookup, searchImages, searchSimilarImages, searchVideos, searchFilterRequest]);
 
   return (
     <div className="h-full flex flex-col">
@@ -290,7 +329,7 @@ export default function SearchPage() {
         <h1 className="text-xl font-semibold text-foreground">Search</h1>
         <div className="flex items-center gap-2">
           {activeModel && (
-            <Badge variant="outline" className="text-[11px] font-normal">
+            <Badge variant="outline" className="text-[11px] font-normal" title={activeModel.name}>
               {activeModel.name}
             </Badge>
           )}
@@ -333,6 +372,7 @@ export default function SearchPage() {
         <div className="relative max-w-2xl mx-auto">
           <SearchIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
+            ref={searchInputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSearch()}
@@ -493,7 +533,7 @@ export default function SearchPage() {
         onOpenChange={setFiltersOpen}
         currentFilters={searchFilterRequest}
         onApply={(filters) => {
-          setSearchFilterRequest({
+          const nextFilters = {
             folders: filters.folders,
             dateRange: filters.dateRange,
             facePresence: filters.facePresence,
@@ -502,8 +542,17 @@ export default function SearchPage() {
               preference: person.preference,
             })),
             facePhotoPath: filters.facePhotoPath,
-          });
+          };
+          setSearchFilterRequest(nextFilters);
           setFiltersOpen(false);
+          setHasSearched(true);
+          setIsSearching(true);
+          setTimeout(() => {
+            void Promise.all([
+              searchImages(query, nextFilters),
+              query.trim() ? searchVideos(query) : Promise.resolve([]),
+            ]).finally(() => setIsSearching(false));
+          }, 150);
         }}
       />
 

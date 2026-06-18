@@ -163,6 +163,7 @@ function mapModel(raw: any): ModelInfo {
     speed: raw.speed,
     diskSize: String(raw.diskSize ?? raw.disk_size ?? ""),
     suitability: String(raw.suitability ?? ""),
+    mediaType: raw.mediaType === "unified" ? "unified" : (raw.mediaType === "video" ? "video" : "image"),
     status: raw.status,
     downloadProgress: raw.downloadProgress,
   };
@@ -337,7 +338,10 @@ export async function getModelDownloadStatus(
   };
 }
 
-export async function activateModel(modelId: string): Promise<ModelInfo> {
+export async function activateModel(
+  modelId: string,
+  _mediaType?: "image" | "video" | "unified",
+): Promise<ModelInfo> {
   return mapModel(
     await apiRequest<any>("/api/index/models/activate", {
       method: "POST",
@@ -516,6 +520,56 @@ export async function searchVideos(payload: {
     totalResults: Number(raw.totalResults ?? 0),
     totalPages: Number(raw.totalPages ?? 0),
     results: Array.isArray(raw.results) ? raw.results.map(mapVideoResult) : [],
+  };
+}
+
+export interface UnifiedSearchResult {
+  id: string;
+  score: number;
+  mediaType: "image" | "video";
+  filePath: string | null;
+  fileId: number | null;
+  dateTaken: string | null;
+  duration: number | null;
+}
+
+export interface UnifiedSearchResponse {
+  query: string;
+  page: number;
+  pageSize: number;
+  totalResults: number;
+  totalPages: number;
+  results: UnifiedSearchResult[];
+}
+
+export async function searchUnified(
+  query: string,
+  modelId: string,
+  mediaType: "all" | "image" | "video" = "all",
+  page = 1,
+  pageSize = 50,
+): Promise<UnifiedSearchResponse> {
+  const raw = await apiRequest<any>("/api/search/unified", {
+    method: "POST",
+    body: JSON.stringify({ query, modelId, mediaType, page, pageSize }),
+  });
+  return {
+    query: String(raw.query ?? ""),
+    page: Number(raw.page ?? 1),
+    pageSize: Number(raw.pageSize ?? 50),
+    totalResults: Number(raw.totalResults ?? 0),
+    totalPages: Number(raw.totalPages ?? 0),
+    results: Array.isArray(raw.results)
+      ? raw.results.map((r: any) => ({
+          id: String(r.id),
+          score: Number(r.score ?? 0),
+          mediaType: r.mediaType === "video" ? "video" : "image",
+          filePath: r.filePath ?? null,
+          fileId: r.fileId != null ? Number(r.fileId) : null,
+          dateTaken: r.dateTaken ?? null,
+          duration: r.duration != null ? Number(r.duration) : null,
+        }))
+      : [],
   };
 }
 

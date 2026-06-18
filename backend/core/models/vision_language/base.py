@@ -3,6 +3,8 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 from typing import Sequence
+import av
+import numpy as np
 import torch
 from PIL import Image
 from transformers.image_utils import load_image
@@ -177,3 +179,48 @@ class BaseEmbeddingModel:
 
     def embed_text(self, text: str) -> torch.Tensor:
         return self.embed_texts([text])[0]
+
+    def _detect_video_scenes(self, video_path: str | Path) -> list[tuple]:
+        from scenedetect import ContentDetector, detect
+
+        return detect(str(video_path), ContentDetector(), start_in_scene=True)
+
+    def _get_keyframes_from_video(
+        self, video_path: str | Path, scenes: list[tuple],
+    ) -> list[Image.Image]:
+        keyframes: list[Image.Image] = []
+        container = av.open(str(video_path))
+        stream = container.streams.video[0]
+        for start, end in scenes:
+            middle = (start.get_seconds() + end.get_seconds()) / 2.0
+            ts = int(middle / float(stream.time_base))
+            container.seek(ts, stream=stream)
+            for frame in container.decode(video=0):
+                keyframes.append(Image.fromarray(frame.to_ndarray(format="rgb24")))
+                break
+        container.close()
+        return keyframes
+
+    def embed_video_keyframes(
+        self,
+        video_paths: Sequence[str | Path],
+    ) -> dict:
+        self._validate_images(video_paths)
+        all_keyframes: list[Image.Image] = []
+        mapping: list[dict] = []
+        for video_path in video_paths:
+            scenes = self._detect_video_scenes(video_path)
+            kf = self._get_keyframes_from_video(video_path, scenes)
+            if not kf:
+                kf = [self._to_pil_image(video_path)]
+            info = {
+                "video_path": str(video_path),
+                "keyframe_start": len(all_keyframes),
+                "keyframe_count": len(kf),
+            }
+            all_keyframes.extend(kf)
+            mapping.append(info)
+        if not all_keyframes:
+            raise ValueError("No keyframes extracted from any video")
+        embeddings = self.embed_images(all_keyframes)
+        return {"embeddings": embeddings, "mapping": mapping}

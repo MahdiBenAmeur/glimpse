@@ -1,7 +1,7 @@
 from sqlmodel import Session, select
 from backend.db_models.folder import Folder
 from backend.schemas.folder import FolderCreate, FolderUpdate
-from typing import List, Optional
+from typing import List, Optional, Sequence
 from pathlib import Path
 from backend.core.models.faces.store import purge_face_entries
 from backend.core.models.vision_language.store import purge_image_entries
@@ -20,7 +20,7 @@ def _folder_score(folder: Folder) -> tuple[int, int, int]:
     )
 
 
-def _dedupe_visible_folders(folders: list[Folder]) -> list[Folder]:
+def _dedupe_visible_folders(folders: Sequence[Folder]) -> list[Folder]:
     """
     Removes duplicate folder records by path.
     """
@@ -29,7 +29,9 @@ def _dedupe_visible_folders(folders: list[Folder]) -> list[Folder]:
         key = canonicalize_path_key(folder.path)
         existing = best_by_key.get(key)
         folder.path = canonicalize_path(folder.path)
-        if existing is None or _folder_score(folder) > _folder_score(existing):
+        if existing is None:
+            best_by_key[key] = folder
+        elif _folder_score(folder) > _folder_score(existing):
             best_by_key[key] = folder
     return sorted(best_by_key.values(), key=lambda folder: int(folder.id or 0))
 

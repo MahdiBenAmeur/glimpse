@@ -12,7 +12,10 @@ from backend.core.models.faces.embedding import embed_faces
 from backend.core.models.faces.store import load_face_vector_store, load_person_vector_store
 from backend.core.models.vision_language.base import BaseEmbeddingModel
 from backend.core.models.vision_language.store import load_image_vector_store
-from backend.core.models.vision_language.video.store import load_video_vector_store
+from backend.core.models.vision_language.unified_store import (
+    load_unified_vector_store,
+    save_unified_vector_store,
+)
 from backend.utils.vector_store_utils import embedding_row
 
 
@@ -228,39 +231,117 @@ def search_by_text(text: str, image_model: BaseEmbeddingModel, top_k: int = 10) 
     return _collect_image_matches(scores, ids, image_vs_meta_data)
 
 
-def search_videos_by_text(text: str, video_model: BaseEmbeddingModel, top_k: int = 10) -> list[dict]:
-    """Search indexed videos by embedding a text query through the X-CLIP model."""
+
+
+
+def _deduplicate_video_results(results: list[dict]) -> list[dict]:
+    """Group video results by video_id, keeping the highest-scoring keyframe."""
+    seen_image: set[str] = set()
+    best_per_video: dict[str, dict] = {}
+    out: list[dict] = []
+    for r in results:
+        if r["media_type"] == "image":
+            if r["file_path"] not in seen_image:
+                seen_image.add(r["file_path"])
+                out.append(r)
+        else:
+            vid = r.get("video_id", r["id"])
+            key = str(vid)
+            if key not in best_per_video:
+                best_per_video[key] = r
+            elif r["score"] > best_per_video[key]["score"]:
+                best_per_video[key] = r
+
+    for vid_result in best_per_video.values():
+        out.append(vid_result)
+
+    out.sort(key=lambda x: x["score"], reverse=True)
+    return out
+
+
+def unified_search_by_text(
+    text: str,
+    model: BaseEmbeddingModel,
+    model_id: str,
+    *,
+    top_k: int = 50,
+    media_type_filter: str = "all",
+) -> list[dict]:
+    """Search the unified store by embedding a text query through the model.
+
+    Returns interleaved image+video results ranked by similarity score.
+    The ``media_type_filter`` can be ``"all"``, ``"image"``, or ``"video"``.
+
+    A progressive-k strategy is used: start with ``top_k * 3`` (capped at 200),
+    then double if the filtered result count is insufficient.
+    """
     if not text.strip():
         raise ValueError("text must not be empty")
 
     top_k = _validate_top_k(top_k)
-    text_embedding = video_model.embed_text(text)
-    video_vs, video_vs_meta_data = load_video_vector_store(video_model)
+    text_embedding = model.embed_text(text)
+    vs, meta = load_unified_vector_store(model_id)
 
-    if video_vs.ntotal == 0:
+    if vs.ntotal == 0:
         return []
 
-    k = min(top_k, int(video_vs.ntotal))
-    scores, ids = video_vs.search(embedding_row(text_embedding), k=k)
+    if media_type_filter in ("all", ""):
+        k = min(top_k, int(vs.ntotal))
+        scores, ids = vs.search(embedding_row(text_embedding), k=k)
+        results = []
+        for score, item_id in zip(scores[0], ids[0]):
+            item_id = int(item_id)
+            if item_id < 0:
+                continue
+            entry = meta.get(str(item_id), {})
+            results.append(_build_unified_result(item_id, score, entry))
+        return _deduplicate_video_results(results)
 
-    matches = []
-    for score, item_id in zip(scores[0], ids[0]):
-        item_id = int(item_id)
-        if item_id < 0:
-            continue
+    initial_k = min(top_k * 3, 200, int(vs.ntotal))
+    candidates: list[int] = []
+    candidate_scores: list[float] = []
+    candidate_meta: list[dict] = []
 
-        meta_entry = video_vs_meta_data.get(str(item_id), {})
-        matches.append(
-            {
-                "video_id": item_id,
-                "score": float(score),
-                "video_path": meta_entry.get("video_path"),
-                "created_at": meta_entry.get("created_at"),
-                "duration": meta_entry.get("duration"),
-                "media_type": "video",
-            }
-        )
-    return matches
+    for k in [initial_k, initial_k * 2, initial_k * 4]:
+        k = min(k, int(vs.ntotal))
+        scores, ids = vs.search(embedding_row(text_embedding), k=k)
+        candidate_scores.clear()
+        candidate_meta.clear()
+        candidates.clear()
+
+        for score, item_id in zip(scores[0], ids[0]):
+            item_id = int(item_id)
+            if item_id < 0:
+                continue
+            entry = meta.get(str(item_id), {})
+            if entry.get("media_type") == media_type_filter:
+                candidates.append(item_id)
+                candidate_scores.append(float(score))
+                candidate_meta.append(entry)
+
+        if len(candidates) >= top_k or k >= int(vs.ntotal):
+            break
+
+    results = []
+    for item_id, score, entry in zip(candidates, candidate_scores, candidate_meta):
+        results.append(_build_unified_result(item_id, score, entry))
+
+    return _deduplicate_video_results(results[:top_k])
+
+
+def _build_unified_result(item_id: int, score: float, entry: dict) -> dict:
+    result = {
+        "id": item_id,
+        "score": float(score),
+        "media_type": entry.get("media_type", "image"),
+        "file_path": entry.get("file_path"),
+        "file_id": entry.get("file_id", item_id),
+        "created_at": entry.get("created_at"),
+        "duration": entry.get("duration"),
+    }
+    if entry.get("video_id") is not None:
+        result["video_id"] = entry["video_id"]
+    return result
 
 
 def search_by_image(

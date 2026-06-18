@@ -165,7 +165,12 @@ export default function PersonDetailPage() {
             <Button variant="outline" size="sm" className="text-xs h-7 gap-1" onClick={() => setIsEditing(true)}>
               <Edit2 className="w-3 h-3" /> Rename
             </Button>
-            <Button variant="outline" size="sm" className="text-xs h-7 gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs h-7 gap-1"
+              onClick={() => navigate("/search", { state: { personFilter: { id: Number(person.id), preference: "must_include" } } })}
+            >
               <Search className="w-3 h-3" /> Search
             </Button>
             <Button

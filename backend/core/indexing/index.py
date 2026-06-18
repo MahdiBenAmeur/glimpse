@@ -12,7 +12,7 @@ from backend.core.models.faces.store import finalize_face_clusters, save_face_ve
 from backend.core.models.vision_language.base import BaseEmbeddingModel
 from backend.core.models.vision_language.store import save_image_vector_store
 from backend.services.app_settings_service import load_app_settings
-from backend.services.library_state_service import load_image_vs_meta_data, load_video_vs_meta_data
+from backend.services.library_state_service import load_image_vs_meta_data
 from backend.utils.image_processing import coerce_image_paths, list_image_files, prepare_images
 from backend.utils.path_utils import canonicalize_path_key
 
@@ -70,13 +70,20 @@ def _dedupe_unindexed_video_paths(
     valid_paths: list[Path],
     path_2_created_at: dict[Path, str | None],
     path_2_duration: dict[Path, float | None],
+    model_id: str | None = None,
 ) -> tuple[list[Path], dict[Path, str | None], dict[Path, float | None], list[dict]]:
-    """Remove videos already present in metadata and report the skipped paths."""
-    video_vs_meta_data = load_video_vs_meta_data()
+    """Remove videos already present in the unified store metadata."""
+    from backend.core.models.vision_language.unified_store import (
+        load_unified_vector_store,
+    )
+
+    resolved_model_id = model_id or "default"
+    _, meta = load_unified_vector_store(resolved_model_id)
+
     seen_keys = {
-        canonicalize_path_key(entry.get("video_path"))
-        for key, entry in video_vs_meta_data.items()
-        if not str(key).startswith("_") and isinstance(entry, dict) and entry.get("video_path")
+        canonicalize_path_key(entry.get("file_path"))
+        for key, entry in meta.items()
+        if not str(key).startswith("_") and isinstance(entry, dict) and entry.get("file_path")
     }
 
     unique_paths: list[Path] = []
@@ -111,6 +118,7 @@ def index_batch(
     batch_size: int = 32,
     save_after_batch: bool = False,
     cancel_check: Callable[[], bool] | None = None,
+    model_id: str | None = None,
 ) -> dict:
     """Run the full indexing workflow for one batch of images.
 
@@ -185,6 +193,7 @@ def index_batch(
         valid_paths,
         validate_inputs=False,
         path_2_created_at=path_2_created_at,
+        model_id=model_id,
     )
     _log_indexing(
         "Image indexing finished for batch",
@@ -239,6 +248,11 @@ def index_batch(
 
     if save_after_batch:
         save_image_vector_store()
+        from backend.core.models.vision_language.unified_store import (
+            save_unified_vector_store,
+        )
+
+        save_unified_vector_store()
         save_face_vector_stores()
         _log_indexing("Saved vector stores after batch")
 

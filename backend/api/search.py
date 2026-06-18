@@ -14,9 +14,12 @@ from pydantic import BaseModel, Field
 
 from backend.config import FACE_QUERY_UPLOAD_DIR, VIDEO_VS_PATH
 from backend.core.models.faces.store import load_face_vector_store, load_person_vector_store
-from backend.core.models.vision_language.video.store import load_video_vector_store
-from backend.core.search.search import global_search, search_by_image, search_videos_by_text
-from backend.api.index import get_active_model_id, get_active_model_info, get_embedding_model
+from backend.core.search.search import global_search, search_by_image, unified_search_by_text
+from backend.api.index import (
+    get_active_model_id,
+    get_active_model_info,
+    get_embedding_model,
+)
 from backend.services.media_service import ensure_thumbnail, ensure_video_thumbnail, get_image_dimensions, get_video_dimensions, get_image_taken_at
 from backend.services.collection_service import CollectionService
 from backend.services.library_state_service import get_image_state, load_image_vs_meta_data
@@ -91,6 +94,34 @@ class VideoSearchResponse(BaseModel):
     totalPages: int
     activeModelId: str | None = None
     results: list[SearchVideoResult]
+
+
+class UnifiedSearchRequest(BaseModel):
+    query: str
+    page: int = Field(default=1, ge=1)
+    pageSize: int = Field(default=50, ge=1, le=200)
+    mediaType: Literal["all", "image", "video"] = "all"
+    modelId: str | None = None
+
+
+class UnifiedSearchItem(BaseModel):
+    id: str
+    score: float
+    mediaType: str
+    filePath: str | None = None
+    fileId: int | None = None
+    dateTaken: str | None = None
+    duration: float | None = None
+
+
+class UnifiedSearchResponse(BaseModel):
+    query: str
+    page: int
+    pageSize: int
+    totalResults: int
+    totalPages: int
+    activeModelId: str | None = None
+    results: list[UnifiedSearchItem]
 
 
 class FacePhotoUploadResponse(BaseModel):
@@ -290,17 +321,72 @@ def run_search(payload: SearchRequest, request: Request) -> dict[str, Any]:
     }
 
 
-def _load_video_vs_meta_data() -> dict[str, Any]:
-    vs_path = Path(str(VIDEO_VS_PATH))
-    meta_path = vs_path / "meta_data.json"
-    if not meta_path.exists():
-        return {}
+@router.post("/unified", response_model=UnifiedSearchResponse)
+def run_unified_search(payload: UnifiedSearchRequest, request: Request) -> dict[str, Any]:
+    if not payload.query.strip():
+        raise HTTPException(status_code=400, detail="query must not be empty")
+
+    resolved_model_id = payload.modelId or get_active_model_id()
+    if resolved_model_id is None:
+        raise HTTPException(status_code=400, detail="No active model selected")
+
     try:
-        with meta_path.open("r", encoding="utf-8") as handle:
-            loaded = json.load(handle)
-    except (json.JSONDecodeError, OSError):
+        model = get_embedding_model(resolved_model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    try:
+        raw_results = unified_search_by_text(
+            payload.query,
+            model,
+            resolved_model_id,
+            top_k=payload.pageSize * 3,
+            media_type_filter=payload.mediaType,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        print(exc)
+        raise HTTPException(status_code=500, detail=f"Unified search failed: {exc}") from exc
+
+    total_results = len(raw_results)
+    total_pages = (total_results + payload.pageSize - 1) // payload.pageSize if total_results else 0
+    start = (payload.page - 1) * payload.pageSize
+    page = raw_results[start: start + payload.pageSize]
+
+    items: list[dict[str, Any]] = []
+    for r in page:
+        items.append({
+            "id": str(r.get("file_id", r.get("id", ""))),
+            "score": r.get("score", 0.0),
+            "mediaType": r.get("media_type", "image"),
+            "filePath": r.get("file_path"),
+            "fileId": r.get("file_id", r.get("id")),
+            "dateTaken": r.get("created_at"),
+            "duration": r.get("duration"),
+        })
+
+    return {
+        "query": payload.query,
+        "page": payload.page,
+        "pageSize": payload.pageSize,
+        "totalResults": total_results,
+        "totalPages": total_pages,
+        "activeModelId": resolved_model_id,
+        "results": items,
+    }
+
+
+def _load_unified_vs_meta_data() -> dict[str, Any]:
+    model_id = get_active_model_id()
+    if model_id is None:
         return {}
-    return loaded if isinstance(loaded, dict) else {}
+    from backend.core.models.vision_language.unified_store import (
+        load_unified_vector_store,
+    )
+
+    _, meta = load_unified_vector_store(model_id)
+    return meta
 
 
 def _build_video_search_result_item(
@@ -335,19 +421,20 @@ def run_video_search(payload: VideoSearchRequest, request: Request) -> dict[str,
     if not payload.query.strip():
         raise HTTPException(status_code=400, detail="query must not be empty")
 
+    resolved_model_id = payload.modelId or get_active_model_id()
+    if resolved_model_id is None:
+        raise HTTPException(status_code=400, detail="No active model selected")
+
     try:
-        video_model = get_embedding_model(payload.modelId or "xclip-video-b32")
+        model = get_embedding_model(resolved_model_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    if not video_model.is_model_downloaded():
-        raise HTTPException(status_code=409, detail="X-CLIP video model is not downloaded. Download it first via /api/index/models/download")
-
-    if not hasattr(video_model, "embed_videos"):
-        raise HTTPException(status_code=400, detail="Selected model does not support video search")
-
     try:
-        raw_results = search_videos_by_text(payload.query, video_model, top_k=payload.pageSize)
+        raw_results = unified_search_by_text(
+            payload.query, model, resolved_model_id,
+            top_k=payload.pageSize, media_type_filter="video",
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -361,14 +448,14 @@ def run_video_search(payload: VideoSearchRequest, request: Request) -> dict[str,
 
     items: list[dict[str, Any]] = []
     for result in raw_results[start_index:end_index]:
-        video_path_value = result.get("video_path")
-        if not video_path_value:
+        file_path_value = result.get("file_path")
+        if not file_path_value:
             continue
-        video_path = Path(video_path_value)
+        video_path = Path(file_path_value)
         items.append(
             _build_video_search_result_item(
                 request=request,
-                video_id=int(result["video_id"]),
+                video_id=int(result["id"]),
                 video_path=video_path,
                 created_at=result.get("created_at"),
                 duration=result.get("duration"),
@@ -389,32 +476,32 @@ def run_video_search(payload: VideoSearchRequest, request: Request) -> dict[str,
 
 @router.get("/videos/{video_id}/file", name="read_search_video_file")
 def read_search_video_file(video_id: int) -> FileResponse:
-    meta_data = _load_video_vs_meta_data()
+    meta_data = _load_unified_vs_meta_data()
     video_entry = meta_data.get(str(video_id))
     if video_entry is None:
         raise HTTPException(status_code=404, detail="Video not found in the index")
 
-    video_path = Path(video_entry.get("video_path", ""))
-    if not video_path.exists() or not video_path.is_file():
+    file_path = Path(video_entry.get("file_path", ""))
+    if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Indexed video file is missing")
 
     media_type = "video/mp4"
-    return FileResponse(path=video_path, filename=video_path.name, media_type=media_type)
+    return FileResponse(path=file_path, filename=file_path.name, media_type=media_type)
 
 
 @router.get("/videos/{video_id}/thumbnail", name="read_search_video_thumbnail")
 def read_search_video_thumbnail(video_id: int) -> FileResponse:
-    meta_data = _load_video_vs_meta_data()
+    meta_data = _load_unified_vs_meta_data()
     video_entry = meta_data.get(str(video_id))
     if video_entry is None:
         raise HTTPException(status_code=404, detail="Video not found in the index")
 
-    video_path = Path(video_entry.get("video_path", ""))
-    if not video_path.exists() or not video_path.is_file():
+    file_path = Path(video_entry.get("file_path", ""))
+    if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Indexed video file is missing")
 
     try:
-        thumbnail_path = ensure_video_thumbnail(video_path)
+        thumbnail_path = ensure_video_thumbnail(file_path)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Could not build thumbnail: {exc}") from exc
 
