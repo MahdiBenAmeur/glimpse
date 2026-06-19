@@ -276,6 +276,9 @@ function mapVideoResult(raw: any): VideoResult {
     duration: raw.duration != null ? Number(raw.duration) : null,
     score: raw.score != null ? Number(raw.score) : undefined,
     mediaType: "video",
+    timestamp: raw.timestamp != null ? Number(raw.timestamp) : undefined,
+    keyframeIndex: raw.keyframeIndex != null ? Number(raw.keyframeIndex) : undefined,
+    totalKeyframes: raw.totalKeyframes != null ? Number(raw.totalKeyframes) : undefined,
   };
 }
 
@@ -534,6 +537,9 @@ export interface UnifiedSearchResult {
   fileId: number | null;
   dateTaken: string | null;
   duration: number | null;
+  timestamp?: number;
+  keyframeIndex?: number;
+  totalKeyframes?: number;
 }
 
 export interface UnifiedSearchResponse {

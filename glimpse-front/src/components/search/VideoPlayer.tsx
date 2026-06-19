@@ -85,6 +85,15 @@ export function VideoPlayer({ video, onClose }: Props) {
               {Math.round(video.score * 100)}%
             </p>
           )}
+          {video.timestamp != null && (
+            <p>
+              <span className="text-foreground/60">Match: </span>
+              {formatDuration(video.timestamp)}
+              {video.keyframeIndex != null && video.totalKeyframes != null && (
+                <> · Scene {video.keyframeIndex + 1} of {video.totalKeyframes}</>
+              )}
+            </p>
+          )}
         </div>
       </div>
     </div>

@@ -97,6 +97,9 @@ class SearchVideoResult(BaseModel):
     duration: float | None = None
     score: float | None = None
     mediaType: str = "video"
+    timestamp: float | None = None
+    keyframeIndex: int | None = None
+    totalKeyframes: int | None = None
 
 
 class VideoSearchRequest(BaseModel):
@@ -132,6 +135,9 @@ class UnifiedSearchItem(BaseModel):
     fileId: int | None = None
     dateTaken: str | None = None
     duration: float | None = None
+    timestamp: float | None = None
+    keyframeIndex: int | None = None
+    totalKeyframes: int | None = None
 
 
 class UnifiedSearchResponse(BaseModel):
@@ -411,6 +417,9 @@ def run_unified_search(
                 "fileId": r.get("file_id", r.get("id")),
                 "dateTaken": r.get("created_at"),
                 "duration": r.get("duration"),
+                "timestamp": r.get("timestamp"),
+                "keyframeIndex": r.get("keyframe_index"),
+                "totalKeyframes": r.get("total_keyframes"),
             }
         )
 
@@ -445,6 +454,9 @@ def _build_video_search_result_item(
     created_at: str | None,
     duration: float | None,
     score: float | None,
+    timestamp: float | None = None,
+    keyframe_index: int | None = None,
+    total_keyframes: int | None = None,
 ) -> dict[str, Any]:
     width, height = get_video_dimensions(video_path)
     return {
@@ -461,6 +473,9 @@ def _build_video_search_result_item(
         "duration": duration,
         "score": score,
         "mediaType": "video",
+        "timestamp": timestamp,
+        "keyframeIndex": keyframe_index,
+        "totalKeyframes": total_keyframes,
     }
 
 
@@ -515,6 +530,9 @@ def run_video_search(payload: VideoSearchRequest, request: Request) -> dict[str,
                 created_at=result.get("created_at"),
                 duration=result.get("duration"),
                 score=result.get("score"),
+                timestamp=result.get("timestamp"),
+                keyframe_index=result.get("keyframe_index"),
+                total_keyframes=result.get("total_keyframes"),
             )
         )
 

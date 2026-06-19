@@ -342,6 +342,11 @@ def _build_unified_result(item_id: int, score: float, entry: dict) -> dict:
     }
     if entry.get("video_id") is not None:
         result["video_id"] = entry["video_id"]
+    if entry.get("keyframe_index") is not None:
+        result["keyframe_index"] = entry["keyframe_index"]
+        result["total_keyframes"] = entry.get("total_keyframes")
+    if entry.get("timestamp") is not None:
+        result["timestamp"] = entry["timestamp"]
     return result
 
 

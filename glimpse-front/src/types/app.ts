@@ -53,6 +53,9 @@ export interface VideoResult {
   duration: number | null;
   score?: number;
   mediaType: "video";
+  timestamp?: number;
+  keyframeIndex?: number;
+  totalKeyframes?: number;
 }
 
 export interface ImageResult {

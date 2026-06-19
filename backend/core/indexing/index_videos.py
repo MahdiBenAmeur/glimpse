@@ -50,6 +50,7 @@ def index_video_batch(
         video_path = vinfo["video_path"]
         start = vinfo["keyframe_start"]
         count = vinfo["keyframe_count"]
+        timestamps = vinfo.get("timestamps", [])
         created_at = (
             path_2_created_at.get(Path(video_path))
             if path_2_created_at is not None
@@ -71,6 +72,7 @@ def index_video_batch(
                 "video_id": video_id,
                 "keyframe_index": i,
                 "total_keyframes": count,
+                "timestamp": timestamps[i] if i < len(timestamps) else None,
                 "created_at": created_at,
                 "duration": duration,
             }

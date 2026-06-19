@@ -195,8 +195,8 @@ class BaseEmbeddingModel:
 
     def _get_keyframes_from_video(
         self, video_path: str | Path, scenes: list[tuple],
-    ) -> list[Image.Image]:
-        keyframes: list[Image.Image] = []
+    ) -> list[tuple[Image.Image, float]]:
+        keyframes: list[tuple[Image.Image, float]] = []
         container = av.open(str(video_path))
         stream = container.streams.video[0]
         for start, end in scenes:
@@ -204,7 +204,7 @@ class BaseEmbeddingModel:
             ts = int(middle / float(stream.time_base))
             container.seek(ts, stream=stream)
             for frame in container.decode(video=0):
-                keyframes.append(Image.fromarray(frame.to_ndarray(format="rgb24")))
+                keyframes.append((Image.fromarray(frame.to_ndarray(format="rgb24")), middle))
                 break
         container.close()
         return keyframes
@@ -218,15 +218,19 @@ class BaseEmbeddingModel:
         mapping: list[dict] = []
         for video_path in video_paths:
             scenes = self._detect_video_scenes(video_path)
-            kf = self._get_keyframes_from_video(video_path, scenes)
-            if not kf:
-                kf = [self._to_pil_image(video_path)]
+            kf_with_ts = self._get_keyframes_from_video(video_path, scenes)
+            timestamps = [ts for _, ts in kf_with_ts]
+            keyframes = [img for img, _ in kf_with_ts]
+            if not keyframes:
+                keyframes = [self._to_pil_image(video_path)]
+                timestamps = [0.0]
             info = {
                 "video_path": str(video_path),
                 "keyframe_start": len(all_keyframes),
-                "keyframe_count": len(kf),
+                "keyframe_count": len(keyframes),
+                "timestamps": timestamps,
             }
-            all_keyframes.extend(kf)
+            all_keyframes.extend(keyframes)
             mapping.append(info)
         if not all_keyframes:
             raise ValueError("No keyframes extracted from any video")

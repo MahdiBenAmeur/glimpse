@@ -36,13 +36,18 @@ export function VideoCard({ video }: Props) {
             <Play className="w-5 h-5 text-background ml-0.5" />
           </div>
         </div>
-        {video.duration != null && (
-          <div className="absolute bottom-2 left-2">
+        <div className="absolute bottom-2 left-2 flex items-center gap-1">
+          {video.duration != null && (
             <div className="px-1.5 py-0.5 rounded bg-background/80 backdrop-blur text-[10px] text-foreground">
               {formatDuration(video.duration)}
             </div>
-          </div>
-        )}
+          )}
+          {video.timestamp != null && (
+            <div className="px-1.5 py-0.5 rounded bg-background/80 backdrop-blur text-[10px] text-foreground">
+              {formatDuration(video.timestamp)}
+            </div>
+          )}
+        </div>
         <div className="px-2 py-1.5">
           <p className="text-[11px] text-muted-foreground truncate">{video.filename}</p>
         </div>
