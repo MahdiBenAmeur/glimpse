@@ -299,61 +299,35 @@ def unified_search_by_text(
     Returns interleaved image+video results ranked by similarity score.
     The ``media_type_filter`` can be ``"all"``, ``"image"``, or ``"video"``.
 
-    A progressive-k strategy is used: start with ``top_k * 3`` (capped at 200),
-    then double if the filtered result count is insufficient.
+    The entire index is searched (``k = vs.ntotal``) so that every item is
+    ranked by score, then results are filtered and deduplicated.  The
+    ``top_k`` parameter is accepted for backward compatibility but is no
+    longer used to cap the search breadth.
     """
     if not text.strip():
         raise ValueError("text must not be empty")
 
-    top_k = _validate_top_k(top_k)
+    _validate_top_k(top_k)
     text_embedding = model.embed_text(text)
     vs, meta = load_unified_vector_store(model_id)
 
     if vs.ntotal == 0:
         return []
 
-    if media_type_filter in ("all", ""):
-        k = min(top_k, int(vs.ntotal))
-        scores, ids = _search_index(vs, embedding_row(text_embedding), k)
-        results = []
-        for score, item_id in zip(scores[0], ids[0]):
-            item_id = int(item_id)
-            if item_id < 0:
-                continue
-            entry = meta.get(str(item_id), {})
-            results.append(_build_unified_result(item_id, score, entry))
-        return _deduplicate_video_results(results)
+    k = int(vs.ntotal)
+    scores, ids = _search_index(vs, embedding_row(text_embedding), k)
 
-    initial_k = min(top_k * 3, 200, int(vs.ntotal))
-    candidates: list[int] = []
-    candidate_scores: list[float] = []
-    candidate_meta: list[dict] = []
-
-    for k in [initial_k, initial_k * 2, initial_k * 4]:
-        k = min(k, int(vs.ntotal))
-        scores, ids = _search_index(vs, embedding_row(text_embedding), k)
-        candidate_scores.clear()
-        candidate_meta.clear()
-        candidates.clear()
-
-        for score, item_id in zip(scores[0], ids[0]):
-            item_id = int(item_id)
-            if item_id < 0:
-                continue
-            entry = meta.get(str(item_id), {})
-            if entry.get("media_type") == media_type_filter:
-                candidates.append(item_id)
-                candidate_scores.append(float(score))
-                candidate_meta.append(entry)
-
-        if len(candidates) >= top_k or k >= int(vs.ntotal):
-            break
-
-    results = []
-    for item_id, score, entry in zip(candidates, candidate_scores, candidate_meta):
+    results: list[dict] = []
+    for score, item_id in zip(scores[0], ids[0]):
+        item_id = int(item_id)
+        if item_id < 0:
+            continue
+        entry = meta.get(str(item_id), {})
+        if media_type_filter not in ("all", "") and entry.get("media_type") != media_type_filter:
+            continue
         results.append(_build_unified_result(item_id, score, entry))
 
-    return _deduplicate_video_results(results[:top_k])
+    return _deduplicate_video_results(results)
 
 
 def _build_unified_result(item_id: int, score: float, entry: dict) -> dict:

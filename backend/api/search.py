@@ -496,7 +496,7 @@ def run_video_search(payload: VideoSearchRequest, request: Request) -> dict[str,
 
     total_results = len(raw_results)
     total_pages = (
-        (total_results + payload.pageSize - 1) // total_results if total_results else 0
+        (total_results + payload.pageSize - 1) // payload.pageSize if total_results else 0
     )
     start_index = (payload.page - 1) * payload.pageSize
     end_index = start_index + payload.pageSize
