@@ -4,7 +4,7 @@ import { ArrowLeft, Edit2, GitMerge, Trash2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useApp } from "@/contexts/AppContext";
+import { useApp } from "@/contexts/useApp";
 import { ResultsGrid } from "@/components/search/ResultsGrid";
 import { getPersonImages } from "@/lib/api";
 import type { ImageResult } from "@/types/app";
@@ -165,7 +165,12 @@ export default function PersonDetailPage() {
             <Button variant="outline" size="sm" className="text-xs h-7 gap-1" onClick={() => setIsEditing(true)}>
               <Edit2 className="w-3 h-3" /> Rename
             </Button>
-            <Button variant="outline" size="sm" className="text-xs h-7 gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs h-7 gap-1"
+              onClick={() => navigate("/search", { state: { personFilter: { id: Number(person.id), preference: "must_include" } } })}
+            >
               <Search className="w-3 h-3" /> Search
             </Button>
             <Button

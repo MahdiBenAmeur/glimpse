@@ -1,0 +1,41 @@
+# python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Backend runtime data 
+backend/data/
+
+# Node modules
+glimpse-front/node_modules/
+electron/node_modules/
+
+# Build outputs
+glimpse-front/dist/
+
+# ide
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# env variables in any subdirec
+**/.env
+**/.env.*
+.env
+
+# Playwright test results
+playwright-report/
+test-results/
+
+# Temporary files
+*.tmp
+*.log

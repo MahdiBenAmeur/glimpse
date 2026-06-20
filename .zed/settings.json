@@ -1,0 +1,13 @@
+{
+  "languages": {
+    "python": {
+      "python_interpreter": {
+        "path": ".venv/bin/python"
+      },
+      "pyright": {
+        "extra_paths": ["."],
+        "type_check_mode": "basic"
+      }
+    }
+  }
+}

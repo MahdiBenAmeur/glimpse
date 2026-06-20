@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { useApp } from "@/contexts/AppContext";
+import { useApp } from "@/contexts/useApp";
 import { EXAMPLE_SEARCHES } from "@/data/exampleSearches";
 import { ResultsGrid } from "@/components/search/ResultsGrid";
 import { AdvancedFiltersDrawer } from "@/components/search/AdvancedFiltersDrawer";
@@ -28,6 +28,7 @@ type SearchRouteState = {
   };
   similarImageId?: string | number;
   similarSourceLabel?: string;
+  personFilter?: { id: number; preference: "must_include" | "prefer" | "exclude" };
 } | null;
 
 type ActiveFilterChip = {
@@ -113,10 +114,11 @@ function buildFilterChips(
 }
 
 export default function SearchPage() {
-  const { images, activeModel, lastIndexedTime, people, searchImages, searchSimilarImages, searchImagesByFile, startIndexing, saveSearch } = useApp();
+  const { images, videoResults, activeModel, lastIndexedTime, people, searchImages, searchVideos, searchSimilarImages, searchImagesByFile, startIndexing, saveSearch } = useApp();
   const location = useLocation();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
@@ -131,6 +133,7 @@ export default function SearchPage() {
   const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [saveName, setSaveName] = useState("");
+  const [mediaTab, setMediaTab] = useState<"all" | "images" | "videos">("all");
 
   const peopleLookup = useMemo(
     () => new Map(people.filter((person) => person.name).map((person) => [Number(person.id), person.name as string])),
@@ -145,12 +148,30 @@ export default function SearchPage() {
     ? (Date.now() - new Date(lastIndexedTime).getTime()) < 86400000
     : false;
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
+      }
+      event.preventDefault();
+      searchInputRef.current?.focus();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   const handleSearch = async () => {
     if (!query.trim() && !searchFilterRequest.facePhotoPath) return;
     setHasSearched(true);
     setIsSearching(true);
     try {
-      await searchImages(query, searchFilterRequest);
+      await Promise.all([
+        searchImages(query, searchFilterRequest),
+        query.trim() ? searchVideos(query) : Promise.resolve([]),
+      ]);
     } finally {
       setIsSearching(false);
     }
@@ -168,7 +189,10 @@ export default function SearchPage() {
       facePhotoPath: null,
     });
     try {
-      await searchImagesByFile(file);
+      await Promise.all([
+        searchImagesByFile(file),
+        searchVideos(""),
+      ]);
     } finally {
       setIsSearching(false);
     }
@@ -239,7 +263,32 @@ export default function SearchPage() {
         setHasSearched(true);
         setIsSearching(true);
         try {
-          await searchImages(state.savedSearch.query || "", nextFilters);
+          await Promise.all([
+            searchImages(state.savedSearch.query || "", nextFilters),
+            state.savedSearch.query ? searchVideos(state.savedSearch.query) : Promise.resolve([]),
+          ]);
+        } finally {
+          if (!cancelled) {
+            setIsSearching(false);
+            navigate(location.pathname, { replace: true, state: null });
+          }
+        }
+        return;
+      }
+
+      if (state.personFilter) {
+        setQuery("");
+        setSearchFilterRequest((current) => ({
+          ...current,
+          people: [state.personFilter],
+        }));
+        setHasSearched(true);
+        setIsSearching(true);
+        try {
+          await Promise.all([
+            searchImages("", { ...searchFilterRequest, people: [state.personFilter] }),
+            searchVideos(""),
+          ]);
         } finally {
           if (!cancelled) {
             setIsSearching(false);
@@ -254,7 +303,10 @@ export default function SearchPage() {
         setHasSearched(true);
         setIsSearching(true);
         try {
-          await searchSimilarImages(state.similarImageId);
+          await Promise.all([
+            searchSimilarImages(state.similarImageId),
+            searchVideos(""),
+          ]);
         } finally {
           if (!cancelled) {
             setIsSearching(false);
@@ -268,7 +320,7 @@ export default function SearchPage() {
     return () => {
       cancelled = true;
     };
-  }, [location.pathname, location.state, navigate, peopleLookup, searchImages, searchSimilarImages]);
+  }, [location.pathname, location.state, navigate, peopleLookup, searchImages, searchSimilarImages, searchVideos, searchFilterRequest]);
 
   return (
     <div className="h-full flex flex-col">
@@ -277,7 +329,7 @@ export default function SearchPage() {
         <h1 className="text-xl font-semibold text-foreground">Search</h1>
         <div className="flex items-center gap-2">
           {activeModel && (
-            <Badge variant="outline" className="text-[11px] font-normal">
+            <Badge variant="outline" className="text-[11px] font-normal" title={activeModel.name}>
               {activeModel.name}
             </Badge>
           )}
@@ -320,6 +372,7 @@ export default function SearchPage() {
         <div className="relative max-w-2xl mx-auto">
           <SearchIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
+            ref={searchInputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSearch()}
@@ -423,6 +476,27 @@ export default function SearchPage() {
         </div>
       )}
 
+      {/* Media tabs */}
+      {hasSearched && !isSearching && (
+        <div className="px-6 pb-3 shrink-0">
+          <div className="flex gap-1 max-w-2xl mx-auto">
+            {(["all", "images", "videos"] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setMediaTab(tab)}
+                className={`px-3 py-1.5 text-xs rounded-md transition-colors capitalize ${
+                  mediaTab === tab
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {tab === "all" ? "All" : tab === "images" ? "Images" : "Videos"}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Results */}
       <div className="flex-1 overflow-auto px-6 pb-6">
         {isSearching ? (
@@ -433,10 +507,24 @@ export default function SearchPage() {
               setQuery(q);
             }}
           />
-        ) : images.length === 0 ? (
-          <NoResultsState onClearFilters={clearFilters} />
+        ) : mediaTab === "videos" ? (
+          videoResults.length === 0 ? (
+            <NoResultsState onClearFilters={clearFilters} />
+          ) : (
+            <ResultsGrid images={videoResults} />
+          )
+        ) : mediaTab === "images" ? (
+          images.length === 0 ? (
+            <NoResultsState onClearFilters={clearFilters} />
+          ) : (
+            <ResultsGrid images={images} />
+          )
         ) : (
-          <ResultsGrid images={images} />
+          images.length === 0 && videoResults.length === 0 ? (
+            <NoResultsState onClearFilters={clearFilters} />
+          ) : (
+            <ResultsGrid images={[...images, ...videoResults]} />
+          )
         )}
       </div>
 
@@ -445,7 +533,7 @@ export default function SearchPage() {
         onOpenChange={setFiltersOpen}
         currentFilters={searchFilterRequest}
         onApply={(filters) => {
-          setSearchFilterRequest({
+          const nextFilters = {
             folders: filters.folders,
             dateRange: filters.dateRange,
             facePresence: filters.facePresence,
@@ -454,8 +542,17 @@ export default function SearchPage() {
               preference: person.preference,
             })),
             facePhotoPath: filters.facePhotoPath,
-          });
+          };
+          setSearchFilterRequest(nextFilters);
           setFiltersOpen(false);
+          setHasSearched(true);
+          setIsSearching(true);
+          setTimeout(() => {
+            void Promise.all([
+              searchImages(query, nextFilters),
+              query.trim() ? searchVideos(query) : Promise.resolve([]),
+            ]).finally(() => setIsSearching(false));
+          }, 150);
         }}
       />
 

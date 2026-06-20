@@ -9,9 +9,13 @@ from PIL import Image
 
 from backend.core.models.faces.detector import crop_faces, detect_faces
 from backend.core.models.faces.embedding import embed_faces
-from backend.core.models.faces.store import load_face_vector_store, load_person_vector_store
+from backend.core.models.faces.store import (
+    load_face_vector_store,
+    load_person_vector_store,
+)
 from backend.core.models.vision_language.base import BaseEmbeddingModel
 from backend.core.models.vision_language.store import load_image_vector_store
+from backend.core.models.vision_language.unified_store import load_unified_vector_store
 from backend.utils.vector_store_utils import embedding_row
 
 
@@ -27,6 +31,13 @@ def _validate_page_number(page_number: int) -> int:
     return int(page_number)
 
 
+def _search_index(index, query: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
+    """Call FAISS search through the installed Python wrapper signature."""
+    search = getattr(index, "search")
+    scores, ids = search(query, k=k)
+    return scores, ids
+
+
 def _normalize_similarity(score: float) -> float:
     """Map cosine-style similarity from [-1, 1] into a clamped [0, 1] score."""
     return max(0.0, min(1.0, (float(score) + 1.0) / 2.0))
@@ -34,7 +45,7 @@ def _normalize_similarity(score: float) -> float:
 
 def _parse_created_at(value: str | None) -> datetime | None:
     """Parse common metadata date formats into a datetime for filtering."""
-    
+
     if value is None:
         return None
 
@@ -65,7 +76,9 @@ def _normalize_face_presence(face_presence: str) -> str:
     return normalized
 
 
-def _normalize_folder_filters(folders: Sequence[str | Path] | str | Path | None) -> list[Path]:
+def _normalize_folder_filters(
+    folders: Sequence[str | Path] | str | Path | None,
+) -> list[Path]:
     """Resolve optional folder filters into absolute Path objects."""
     if folders is None:
         return []
@@ -88,7 +101,9 @@ def _image_in_folders(image_path: str | None, folders: list[Path]) -> bool:
     )
 
 
-def _normalize_person_filters(person_filters: dict | Sequence[dict] | None) -> dict[str, set[int]]:
+def _normalize_person_filters(
+    person_filters: dict | Sequence[dict] | None,
+) -> dict[str, set[int]]:
     """Convert incoming person filters into must/prefer/exclude id sets.
 
     The API accepts either a compact mapping of person_id to preference or a
@@ -105,7 +120,10 @@ def _normalize_person_filters(person_filters: dict | Sequence[dict] | None) -> d
         return normalized
 
     if isinstance(person_filters, dict):
-        items = [{"person_id": person_id, "preference": preference} for person_id, preference in person_filters.items()]
+        items = [
+            {"person_id": person_id, "preference": preference}
+            for person_id, preference in person_filters.items()
+        ]
     else:
         items = list(person_filters)
 
@@ -114,21 +132,27 @@ def _normalize_person_filters(person_filters: dict | Sequence[dict] | None) -> d
             raise TypeError("person_filters must be a dict or a sequence of dicts")
 
         person_id = item.get("person_id", item.get("id"))
-        preference = item.get("preference", item.get("face_preference", item.get("person_preference")))
+        preference = item.get(
+            "preference", item.get("face_preference", item.get("person_preference"))
+        )
 
         if person_id is None or preference is None:
             raise ValueError("Each person filter must include person_id and preference")
 
         preference_key = str(preference).strip().lower().replace(" ", "_")
         if preference_key not in normalized:
-            raise ValueError("person filter preferences must be: must_include, prefer, or exclude")
+            raise ValueError(
+                "person filter preferences must be: must_include, prefer, or exclude"
+            )
 
         normalized[preference_key].add(int(person_id))
 
     return normalized
 
 
-def _build_image_face_context(face_meta_data: dict) -> tuple[set[str], dict[str, set[int]]]:
+def _build_image_face_context(
+    face_meta_data: dict,
+) -> tuple[set[str], dict[str, set[int]]]:
     """Build quick lookup tables for image face presence and person membership."""
     images_with_faces: set[str] = set()
     image_path_2_person_ids: dict[str, set[int]] = {}
@@ -168,7 +192,9 @@ def _collect_face_photo_scores(face_results: list[dict]) -> dict[str, float]:
     return image_path_2_score
 
 
-def _collect_image_matches(scores: np.ndarray, ids: np.ndarray, image_vs_meta_data: dict) -> list[dict]:
+def _collect_image_matches(
+    scores: np.ndarray, ids: np.ndarray, image_vs_meta_data: dict
+) -> list[dict]:
     """Combine FAISS image search scores and ids with stored image metadata."""
     matches = []
     for score, item_id in zip(scores[0], ids[0]):
@@ -188,7 +214,9 @@ def _collect_image_matches(scores: np.ndarray, ids: np.ndarray, image_vs_meta_da
     return matches
 
 
-def _collect_face_matches(scores: np.ndarray, ids: np.ndarray, face_meta_data: dict) -> list[dict]:
+def _collect_face_matches(
+    scores: np.ndarray, ids: np.ndarray, face_meta_data: dict
+) -> list[dict]:
     """Combine FAISS face search scores and ids with stored face metadata."""
     matches = []
     for score, face_id in zip(scores[0], ids[0]):
@@ -210,38 +238,135 @@ def _collect_face_matches(scores: np.ndarray, ids: np.ndarray, face_meta_data: d
     return matches
 
 
-def search_by_text(text: str, image_model: BaseEmbeddingModel, top_k: int = 10) -> list[dict]:
+def search_by_text(
+    text: str,
+    image_model: BaseEmbeddingModel,
+    top_k: int = 10,
+    *,
+    model_id: str | None = None,
+) -> list[dict]:
     """Search indexed images by embedding a text query into the image model space."""
     if not text.strip():
         raise ValueError("text must not be empty")
 
     top_k = _validate_top_k(top_k)
     text_embedding = image_model.embed_text(text)
-    image_vs, image_vs_meta_data = load_image_vector_store(image_model)
+    image_vs, image_vs_meta_data = load_image_vector_store(image_model, model_id)
 
     if image_vs.ntotal == 0:
         return []
 
     k = min(top_k, int(image_vs.ntotal))
-    scores, ids = image_vs.search(embedding_row(text_embedding), k=k)
+    scores, ids = _search_index(image_vs, embedding_row(text_embedding), k)
     return _collect_image_matches(scores, ids, image_vs_meta_data)
+
+
+def _deduplicate_video_results(results: list[dict]) -> list[dict]:
+    """Group video results by video_id, keeping the highest-scoring keyframe."""
+    seen_image: set[str] = set()
+    best_per_video: dict[str, dict] = {}
+    out: list[dict] = []
+    for r in results:
+        if r["media_type"] == "image":
+            if r["file_path"] not in seen_image:
+                seen_image.add(r["file_path"])
+                out.append(r)
+        else:
+            vid = r.get("video_id", r["id"])
+            key = str(vid)
+            if key not in best_per_video:
+                best_per_video[key] = r
+            elif r["score"] > best_per_video[key]["score"]:
+                best_per_video[key] = r
+
+    for vid_result in best_per_video.values():
+        out.append(vid_result)
+
+    out.sort(key=lambda x: x["score"], reverse=True)
+    return out
+
+
+def unified_search_by_text(
+    text: str,
+    model: BaseEmbeddingModel,
+    model_id: str,
+    *,
+    top_k: int = 50,
+    media_type_filter: str = "all",
+) -> list[dict]:
+    """Search the unified store by embedding a text query through the model.
+
+    Returns interleaved image+video results ranked by similarity score.
+    The ``media_type_filter`` can be ``"all"``, ``"image"``, or ``"video"``.
+
+    The entire index is searched (``k = vs.ntotal``) so that every item is
+    ranked by score, then results are filtered and deduplicated.  The
+    ``top_k`` parameter is accepted for backward compatibility but is no
+    longer used to cap the search breadth.
+    """
+    if not text.strip():
+        raise ValueError("text must not be empty")
+
+    _validate_top_k(top_k)
+    text_embedding = model.embed_text(text)
+    vs, meta = load_unified_vector_store(model_id)
+
+    if vs.ntotal == 0:
+        return []
+
+    k = int(vs.ntotal)
+    scores, ids = _search_index(vs, embedding_row(text_embedding), k)
+
+    results: list[dict] = []
+    for score, item_id in zip(scores[0], ids[0]):
+        item_id = int(item_id)
+        if item_id < 0:
+            continue
+        entry = meta.get(str(item_id), {})
+        if media_type_filter not in ("all", "") and entry.get("media_type") != media_type_filter:
+            continue
+        results.append(_build_unified_result(item_id, score, entry))
+
+    return _deduplicate_video_results(results)
+
+
+def _build_unified_result(item_id: int, score: float, entry: dict) -> dict:
+    result = {
+        "id": item_id,
+        "score": float(score),
+        "media_type": entry.get("media_type", "image"),
+        "file_path": entry.get("file_path"),
+        "file_id": entry.get("file_id", item_id),
+        "created_at": entry.get("created_at"),
+        "duration": entry.get("duration"),
+    }
+    if entry.get("video_id") is not None:
+        result["video_id"] = entry["video_id"]
+    if entry.get("keyframe_index") is not None:
+        result["keyframe_index"] = entry["keyframe_index"]
+        result["total_keyframes"] = entry.get("total_keyframes")
+    if entry.get("timestamp") is not None:
+        result["timestamp"] = entry["timestamp"]
+    return result
 
 
 def search_by_image(
     image: str | Path | Image.Image,
     image_model: BaseEmbeddingModel,
     top_k: int = 10,
+    *,
+    model_id: str | None = None,
 ) -> list[dict]:
     """Search indexed images by embedding a query image."""
     top_k = _validate_top_k(top_k)
     image_embedding = image_model.embed_image(image)
-    image_vs, image_vs_meta_data = load_image_vector_store(image_model)
+    image_vs, image_vs_meta_data = load_image_vector_store(image_model, model_id)
 
     if image_vs.ntotal == 0:
         return []
 
     k = min(top_k, int(image_vs.ntotal))
-    scores, ids = image_vs.search(embedding_row(image_embedding), k=k)
+    scores, ids = _search_index(image_vs, embedding_row(image_embedding), k)
     return _collect_image_matches(scores, ids, image_vs_meta_data)
 
 
@@ -263,7 +388,9 @@ def search_by_face(image_path: str | Path, top_k: int = 10) -> list[dict]:
         return []
 
     path_2_crops = crop_faces({query_path: boxes})
-    path_2_embeddings = embed_faces(path_2_crops, batch_size=len(path_2_crops[query_path]))
+    path_2_embeddings = embed_faces(
+        path_2_crops, batch_size=len(path_2_crops[query_path])
+    )
     query_embeddings = path_2_embeddings.get(query_path)
     if query_embeddings is None or query_embeddings.numel() == 0:
         return []
@@ -285,7 +412,7 @@ def search_by_face(image_path: str | Path, top_k: int = 10) -> list[dict]:
         }
 
         face_k = min(top_k, int(face_vs.ntotal))
-        face_scores, face_ids = face_vs.search(row, k=face_k)
+        face_scores, face_ids = _search_index(face_vs, row, face_k)
         result["matches"] = _collect_face_matches(face_scores, face_ids, face_meta_data)
 
         results.append(result)
@@ -298,7 +425,7 @@ def search_by_person_id(person_id: int) -> dict:
     person_id = int(person_id)
     _, person_meta_data = load_person_vector_store()
     person_entry = person_meta_data.get(str(person_id))
-    if person_entry is None:
+    if not isinstance(person_entry, dict):
         raise KeyError(f"Person id not found: {person_id}")
 
     return {
@@ -319,6 +446,7 @@ def global_search(
     face_presence: str = "any",
     person_filters: dict | Sequence[dict] | None = None,
     face_photo_path: str | Path | None = None,
+    model_id: str | None = None,
 ) -> dict:
     """Run combined text, folder, date, face, and person-aware search.
 
@@ -331,7 +459,9 @@ def global_search(
     """
     normalized_query = query.strip()
     if not normalized_query and face_photo_path is None:
-        raise ValueError("query must not be empty unless a face photo search is provided")
+        raise ValueError(
+            "query must not be empty unless a face photo search is provided"
+        )
 
     page_size = _validate_top_k(k)
     page_number = _validate_page_number(page_number)
@@ -349,9 +479,9 @@ def global_search(
 
     if normalized_query:
         text_embedding = image_model.embed_text(normalized_query)
-        image_vs, image_vs_meta_data = load_image_vector_store(image_model)
+        image_vs, image_vs_meta_data = load_image_vector_store(image_model, model_id)
     else:
-        image_vs, image_vs_meta_data = load_image_vector_store(image_model)
+        image_vs, image_vs_meta_data = load_image_vector_store(image_model, model_id)
 
     if image_vs.ntotal == 0:
         return {
@@ -365,7 +495,9 @@ def global_search(
 
     all_image_count = int(image_vs.ntotal)
     if normalized_query:
-        text_scores, image_ids = image_vs.search(embedding_row(text_embedding), k=all_image_count)
+        text_scores, image_ids = _search_index(
+            image_vs, embedding_row(text_embedding), all_image_count
+        )
         candidate_rows = zip(text_scores[0], image_ids[0])
     else:
         candidate_rows = (
@@ -378,7 +510,9 @@ def global_search(
         )
 
     _, face_meta_data = load_face_vector_store()
-    images_with_faces, image_path_2_person_ids = _build_image_face_context(face_meta_data)
+    images_with_faces, image_path_2_person_ids = _build_image_face_context(
+        face_meta_data
+    )
 
     face_photo_scores: dict[str, float] = {}
     if face_photo_path is not None:
@@ -422,7 +556,11 @@ def global_search(
             continue
 
         text_score = _normalize_similarity(raw_text_score) if normalized_query else None
-        face_score = face_photo_scores.get(image_path, 0.0) if face_photo_path is not None else None
+        face_score = (
+            face_photo_scores.get(image_path, 0.0)
+            if face_photo_path is not None
+            else None
+        )
         preferred_people_score = (
             len(image_person_ids.intersection(prefer_ids)) / len(prefer_ids)
             if prefer_ids

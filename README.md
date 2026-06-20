@@ -1,13 +1,14 @@
 # Glimpse
 
-Glimpse is a local-first desktop app for exploring a personal image library with semantic search, image-to-image similarity, face clustering, favorites, collections, and saved searches. The goal of the app is to let you find photos by meaning instead of filenames alone while keeping indexing, metadata, thumbnails, and model inference on your own machine. Your data never leaves your machine.
+Glimpse is a local-first desktop app for exploring a personal image and video library with semantic search, image-to-image similarity, face clustering, favorites, collections, and saved searches. The goal of the app is to let you find photos and videos by meaning instead of filenames alone while keeping indexing, metadata, thumbnails, and model inference on your own machine. Your data never leaves your machine.
 
 ## What Glimpse does
 
-- indexes local image folders and optionally imported photos
-- builds image embeddings with a selectable vision-language model
+- indexes local image and video folders and optionally imported files
+- builds embeddings with a selectable vision-language model
 - detects faces and groups them into people clusters
-- lets you search by text, by similar image, and with people/date/folder filters
+- lets you search by text, by similar image, by video scene, and with people/date/folder filters
+- shows the exact timestamp of the matching scene within a video result
 - keeps lightweight organization features such as favorites, collections, and saved searches
 
 ## Setup
@@ -80,7 +81,6 @@ If this is the first time you use the app, you will also need to download and ac
 - `scripts/`: maintenance and inspection scripts for local data and clustering analysis
 - `test_images/`: sample images for manual testing
 - `requirements.txt`: root Python dependency file for the backend/runtime
-- `FEATURES.md`: broader product feature inventory
 
 ### Backend
 
@@ -108,15 +108,16 @@ If this is the first time you use the app, you will also need to download and ac
 
 ## How the pipeline works
 
-1. You choose an active image embedding model, then add folders or import files into the app-managed library.
-2. The index job scans those folders, keeps supported image paths, normalizes paths, and captures a `created_at` value from image metadata or filesystem timestamps.
-3. The active vision-language model embeds each image batch and writes the vectors to the image FAISS store. Image ids and per-image metadata such as `image_path` and `created_at` are stored alongside that index in `meta_data.json`.
-4. If face detection is enabled, the face pipeline runs on the same image batch: YOLO detects boxes, crops are embedded by the face model, and every detected face is written into the face FAISS store with its source image path, face box, confidence, and quality score.
-5. After face vectors are written, the app reclusters all indexed faces with DBSCAN to rebuild person identities. Each person record stores a centroid, the list of source image paths and face boxes, weighted quality data, and a small set of top exemplar faces for previews.
-6. The image, face, and person stores are persisted under `backend/data`, folder scan stats are updated in SQLite, and thumbnail files are generated lazily and cached the first time they are requested.
-7. Text search embeds the query with the currently active image model, searches the image FAISS store, and then applies folder, date, face-presence, person, and optional face-photo filters before paging the results.
-8. Image-to-image search embeds the query image with the same active model and searches the image store directly. Face-photo search embeds detected query faces and matches them against the face store, then folds those matches back into image results.
-9. The API enriches final results with thumbnail URLs, dimensions, display dates, favorites, collections, and people labels before returning them to the frontend.
+1. You choose an active embedding model, then add folders or import files into the app-managed library.
+2. The index job scans those folders, finds supported image and video paths, normalizes paths, and captures a `created_at` value from metadata or filesystem timestamps.
+3. For **images**: the vision-language model embeds each batch and writes the vectors to a unified FAISS store alongside per-file metadata (`file_path`, `created_at`, etc.).
+4. For **videos**: scene detection (PySceneDetect) splits each video into shots. The midpoint frame of each scene is extracted (PyAV), embedded with the same image model, and written into the **same unified FAISS store** with `media_type: "video"`, the source `video_id`, the precise scene midpoint timestamp, and keyframe position metadata. A single video may produce multiple keyframe vectors.
+5. If face detection is enabled, the face pipeline runs on images: YOLO detects boxes, crops are embedded by the face model, and every detected face is written into the face FAISS store with its source image path, face box, confidence, and quality score.
+6. After face vectors are written, the app reclusters all indexed faces with DBSCAN to rebuild person identities. Each person record stores a centroid, the list of source image paths and face boxes, weighted quality data, and a small set of top exemplar faces for previews.
+7. The unified image+video store, face store, and person store are persisted under `backend/data`. Folder scan stats are updated in SQLite. Thumbnail files are generated lazily and cached on first request.
+8. **Text search** embeds the query with the currently active model, searches the **entire unified FAISS index** (every item is ranked by score — no early cutoff), filters by media type ("all", "image", or "video"), deduplicates (best keyframe per video, unique path per image), and paginates results. Video results include the exact scene timestamp and keyframe position.
+9. Image-to-image search embeds the query image with the same active model and searches the unified store directly. Face-photo search embeds detected query faces and matches them against the face store, then folds those matches back into results.
+10. The API enriches final results with thumbnail URLs, dimensions, display dates, favorites, collections, and people labels before returning them to the frontend.
 
 
 ### Desktop shell and scripts

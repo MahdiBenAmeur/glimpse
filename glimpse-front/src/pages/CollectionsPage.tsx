@@ -1,15 +1,15 @@
 import { useState } from "react";
-import { Plus, FolderOpen, Trash2, Edit2 } from "lucide-react";
+import { Plus, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useApp } from "@/contexts/AppContext";
+import { useApp } from "@/contexts/useApp";
 import { useNavigate } from "react-router-dom";
 
 export default function CollectionsPage() {
-  const { collections, createCollection, deleteCollection } = useApp();
+  const { collections, createCollection } = useApp();
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");

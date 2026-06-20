@@ -3,7 +3,7 @@ import { Database, FolderOpen, Users, Image, Clock, HardDrive, RefreshCw, Plus, 
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useApp } from "@/contexts/AppContext";
+import { useApp } from "@/contexts/useApp";
 import { getStorageSummary } from "@/lib/api";
 
 export default function IndexPage() {
@@ -25,6 +25,7 @@ export default function IndexPage() {
   const isIndexing = indexingStatus.phase !== "idle" && indexingStatus.phase !== "complete" && indexingStatus.phase !== "cancelled";
   const isCancelling = indexingStatus.phase === "cancelling";
   const isClustering = indexingStatus.phase === "clustering";
+  const isVideoKeyframes = indexingStatus.phase === "video_keyframes";
   const handleReindexFolder = (folderId: string) => void startIndexing({ folderIds: [folderId], resetIndex: false });
 
   useEffect(() => {
@@ -78,13 +79,13 @@ export default function IndexPage() {
       {isIndexing && (
         <div className="bg-accent border border-border rounded-xl p-4 mb-6">
           <div className="flex items-center gap-2 mb-2">
-            {isClustering ? (
+            {isClustering || isVideoKeyframes ? (
               <Loader2 className="w-4 h-4 text-primary animate-spin" />
             ) : (
               <RefreshCw className="w-4 h-4 text-primary animate-spin" />
             )}
             <span className="text-sm font-medium text-foreground">
-              {isCancelling ? "Cancelling indexing..." : isClustering ? "Clustering faces..." : "Indexing in progress..."}
+              {isCancelling ? "Cancelling indexing..." : isClustering ? "Clustering faces..." : isVideoKeyframes ? "Extracting keyframes..." : "Indexing in progress..."}
             </span>
             <Badge variant="secondary" className="text-[10px]">{indexingStatus.progress}%</Badge>
             <Button
@@ -103,8 +104,13 @@ export default function IndexPage() {
           <p className="text-[10px] text-muted-foreground mt-2">
             {isClustering
               ? `We are clustering ${indexingStatus.facesDetected.toLocaleString()} detected faces into people.`
-              : `${indexingStatus.processed.toLocaleString()} / ${indexingStatus.total.toLocaleString()} files - ${indexingStatus.facesDetected} faces detected`}
+              : isVideoKeyframes
+                ? `${indexingStatus.processed.toLocaleString()} / ${indexingStatus.total.toLocaleString()} videos`
+                : `${indexingStatus.processed.toLocaleString()} / ${indexingStatus.total.toLocaleString()} files - ${indexingStatus.facesDetected} faces detected`}
           </p>
+          {isVideoKeyframes && indexingStatus.currentFile && (
+            <p className="text-[10px] text-muted-foreground/60 mt-1 truncate">{indexingStatus.currentFile}</p>
+          )}
         </div>
       )}
 
@@ -155,6 +161,19 @@ export default function IndexPage() {
           </div>
         )}
       </div>
+
+      {indexingStatus.error && !isIndexing && (
+        <div className="bg-destructive/10 border border-destructive/30 rounded-xl p-4 mb-6 flex items-start gap-3">
+          <AlertTriangle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground">Indexing failed</p>
+            <p className="text-xs text-muted-foreground mt-1">{indexingStatus.error}</p>
+          </div>
+          <Button variant="outline" size="sm" className="text-xs h-8 shrink-0" onClick={() => void startIndexing({ resetIndex: true })}>
+            Retry
+          </Button>
+        </div>
+      )}
 
       {!activeModel && (
         <div className="mt-6 bg-warning/10 border border-warning/30 rounded-xl p-4 flex items-start gap-3">

@@ -1,6 +1,6 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { toast } from "@/components/ui/sonner";
-import { type AppSettings, type CollectionInfo, type FolderInfo, type ImageResult, type ModelInfo, type PersonInfo, type SavedSearch } from "@/types/app";
+import React, { createContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { toast } from "sonner";
+import { type AppSettings, type CollectionInfo, type FolderInfo, type ImageResult, type ModelInfo, type PersonInfo, type SavedSearch, type VideoResult } from "@/types/app";
 import type { PersonMergeResult } from "@/lib/api";
 import * as api from "@/lib/api";
 
@@ -14,6 +14,7 @@ interface IndexingStatus {
   facesDetected: number;
   skipped: number;
   currentFile?: string;
+  error?: string | null;
 }
 
 interface SearchFilters {
@@ -41,12 +42,14 @@ interface AppState {
   folders: FolderInfo[];
   people: PersonInfo[];
   images: ImageResult[];
+  videoResults: VideoResult[];
   favorites: ImageResult[];
   collections: CollectionInfo[];
   savedSearches: SavedSearch[];
   indexingStatus: IndexingStatus;
   lastIndexedTime: string | null;
   totalIndexedImages: number;
+  totalIndexedVideos: number;
   isHydrating: boolean;
   isWorking: boolean;
   busyMessage: string | null;
@@ -75,13 +78,14 @@ interface AppContextType extends AppState {
   saveSearch: (name: string, query: string, filters: Record<string, unknown>) => Promise<void>;
   deleteSavedSearch: (id: string) => Promise<void>;
   searchImages: (query: string, filters?: SearchFilters) => Promise<ImageResult[]>;
+  searchVideos: (query: string) => Promise<VideoResult[]>;
   searchSimilarImages: (imageId: string | number) => Promise<ImageResult[]>;
   searchImagesByFile: (file: File) => Promise<ImageResult[]>;
   refreshData: (options?: { showLoader?: boolean }) => Promise<void>;
   updateSettings: (changes: Partial<AppSettings>) => Promise<AppSettings>;
 }
 
-const AppContext = createContext<AppContextType | null>(null);
+export const AppContext = createContext<AppContextType | null>(null);
 const UI_STATE_KEY = "glimpse-one-ui-state";
 
 /**
@@ -139,7 +143,7 @@ function deriveOnboardingState(
 }
 
 /**
- * Updates the model list to set a specific model as active.
+ * Updates the model list to set a specific model as the single active model.
  */
 function markModelAsActive(models: ModelInfo[], modelId: string) {
   const nextModels = models.map((model) => {
@@ -181,12 +185,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     folders: [],
     people: [],
     images: [],
+    videoResults: [],
     favorites: [],
     collections: [],
     savedSearches: [],
     indexingStatus: { phase: "idle", progress: 0, total: 0, processed: 0, facesDetected: 0, skipped: 0 },
     lastIndexedTime: null,
     totalIndexedImages: 0,
+    totalIndexedVideos: 0,
     isHydrating: true,
     isWorking: false,
     busyMessage: null,
@@ -258,7 +264,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ? summaryResult.value.models
           : prev.models;
 
-      const activeModel = summaryResult.status === "fulfilled" ? summaryResult.value.activeModel : prev.activeModel;
+      const activeModel = summaryResult.status === "fulfilled"
+        ? (summaryResult.value.activeModel ?? null)
+        : prev.activeModel;
       const folders = foldersResult.status === "fulfilled" ? foldersResult.value : prev.folders;
       const people = peopleResult.status === "fulfilled" ? peopleResult.value : prev.people;
       const collections = collectionsResult.status === "fulfilled" ? collectionsResult.value : prev.collections;
@@ -268,6 +276,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const indexingStatus = summaryResult.status === "fulfilled" ? summaryResult.value.indexingStatus : prev.indexingStatus;
       const lastIndexedTime = summaryResult.status === "fulfilled" ? summaryResult.value.lastIndexedTime : prev.lastIndexedTime;
       const totalIndexedImages = summaryResult.status === "fulfilled" ? summaryResult.value.totalIndexedImages : prev.totalIndexedImages;
+      const totalIndexedVideos = summaryResult.status === "fulfilled" ? summaryResult.value.totalIndexedVideos : prev.totalIndexedVideos;
 
       const onboarding = deriveOnboardingState(
         activeModel,
@@ -294,6 +303,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         indexingStatus,
         lastIndexedTime,
         totalIndexedImages,
+        totalIndexedVideos,
       };
     });
   }, [hideOnboardingWhileIndexing]);
@@ -336,6 +346,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (!isIndexingPhase(nextStatus.phase)) {
           if (hideOnboardingWhileIndexing) {
             setBackgroundIndexingHidden(false);
+          }
+          if (nextStatus.error) {
+            toast.error(`Indexing failed: ${nextStatus.error}`);
           }
           await refreshData();
         }
@@ -434,7 +447,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         setBackgroundIndexingHidden(false);
         setState((prev) => {
-          const { models, activeModel } = markModelAsActive(prev.models, id);
+          const { models, activeModel: nextActive } = markModelAsActive(prev.models, id);
           const nextIndexingStatus: IndexingStatus = {
             phase: "scanning",
             progress: 0,
@@ -445,7 +458,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             currentFile: currentFolders[0] ?? prev.indexingStatus.currentFile,
           };
           const onboarding = deriveOnboardingState(
-            activeModel,
+            nextActive,
             prev.folders,
             nextIndexingStatus,
             prev.lastIndexedTime,
@@ -456,7 +469,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return {
             ...prev,
             models,
-            activeModel,
+            activeModel: nextActive,
             indexingStatus: nextIndexingStatus,
             isFirstLaunch: onboarding.isFirstLaunch,
             onboardingStep: onboarding.onboardingStep,
@@ -473,9 +486,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           });
 
           setState((prev) => {
-            const { models, activeModel } = markModelAsActive(prev.models, id);
+            const { models, activeModel: nextActive } = markModelAsActive(prev.models, id);
             const onboarding = deriveOnboardingState(
-              activeModel,
+              nextActive,
               prev.folders,
               summary.indexingStatus,
               summary.lastIndexedTime,
@@ -486,7 +499,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             return {
               ...prev,
               models,
-              activeModel,
+              activeModel: nextActive,
               indexingStatus: summary.indexingStatus,
               lastIndexedTime: summary.lastIndexedTime,
               totalIndexedImages: summary.totalIndexedImages,
@@ -802,6 +815,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
    * Executes an image search with specific filters.
    */
   const searchImages = useCallback(async (query: string, filters?: SearchFilters) => {
+    const modelId = state.activeModel?.id ?? null;
     try {
       const results = await api.searchImages({
         query,
@@ -810,7 +824,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         facePresence: filters?.facePresence ?? "any",
         people: filters?.people ?? [],
         facePhotoPath: filters?.facePhotoPath ?? null,
-        modelId: state.activeModel?.id ?? undefined,
+        modelId,
         page: 1,
         pageSize: 100,
       });
@@ -821,6 +835,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       throw error;
     }
   }, [state.activeModel?.id]);
+
+  /**
+   * Searches videos by text query.
+   */
+  const searchVideosFn = useCallback(async (query: string) => {
+    try {
+      const response = await api.searchVideos({ query });
+      setState((prev) => ({ ...prev, videoResults: response.results }));
+      return response.results;
+    } catch {
+      setState((prev) => ({ ...prev, videoResults: [] }));
+      return [];
+    }
+  }, []);
 
   /**
    * Searches for images similar to a specific indexed image.
@@ -882,6 +910,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       saveSearch,
       deleteSavedSearch,
       searchImages,
+      searchVideos: searchVideosFn,
       searchSimilarImages,
       searchImagesByFile,
       refreshData,
@@ -892,11 +921,4 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 }
 
-/**
- * Custom hook to access the application context.
- */
-export function useApp() {
-  const ctx = useContext(AppContext);
-  if (!ctx) throw new Error("useApp must be used within AppProvider");
-  return ctx;
-}
+

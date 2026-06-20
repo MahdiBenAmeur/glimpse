@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useEffect, useState, type ReactNode } from "react";
 
 type Theme = "system" | "light" | "dark";
 
@@ -7,7 +7,7 @@ interface ThemeContextType {
   setTheme: (theme: Theme) => void;
 }
 
-const ThemeContext = createContext<ThemeContextType | null>(null);
+export const ThemeContext = createContext<ThemeContextType | null>(null);
 
 /**
  * Checks if the system preference is dark mode.
@@ -52,11 +52,4 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   );
 }
 
-/**
- * Custom hook to access the theme context.
- */
-export function useTheme() {
-  const ctx = useContext(ThemeContext);
-  if (!ctx) throw new Error("useTheme must be used within ThemeProvider");
-  return ctx;
-}
+

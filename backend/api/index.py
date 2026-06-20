@@ -5,19 +5,40 @@ import threading
 import traceback
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from backend.config import DATA_DIR, FACE_VS_PATH, IMAGE_VS_PATH, MODEL_STATE_PATH, PERSON_VS_PATH, THUMBNAIL_CACHE_DIR, MODELS_CACHE_DIR
+from backend.config import (
+    DATA_DIR,
+    FACE_VS_PATH,
+    IMAGE_VS_PATH,
+    MODEL_STATE_PATH,
+    MODELS_CACHE_DIR,
+    PERSON_VS_PATH,
+    THUMBNAIL_CACHE_DIR,
+    VIDEO_VS_PATH,
+    model_scoped_vs_path,
+)
 from backend.core.indexing.index import index_batch
-from backend.core.models.faces.store import finalize_face_clusters, reset_face_vector_stores, save_face_vector_stores
+from backend.core.indexing.index_videos import index_video_batch
+from backend.core.models.faces.store import (
+    finalize_face_clusters,
+    reset_face_vector_stores,
+    save_face_vector_stores,
+)
 from backend.core.models.vision_language.base import BaseEmbeddingModel
 from backend.core.models.vision_language.clip import ClipEmbeddingModel
-from backend.core.models.vision_language.siglip import SiglipEmbeddingModel, SiglipLargeEmbeddingModel
-from backend.core.models.vision_language.store import reset_image_vector_store, save_image_vector_store
+from backend.core.models.vision_language.siglip import (
+    SiglipEmbeddingModel,
+    SiglipLargeEmbeddingModel,
+)
+from backend.core.models.vision_language.store import (
+    reset_image_vector_store,
+    save_image_vector_store,
+)
 from backend.db_models.database import get_session
 from backend.db_models.folder import Folder
 from backend.services.folder_service import _folder_score
@@ -25,10 +46,23 @@ from backend.services.media_service import clear_thumbnail_cache
 from backend.utils.image_processing import list_image_files
 from backend.utils.path_utils import canonicalize_path, canonicalize_path_key
 from backend.utils.vector_store_utils import delete_vs
+from backend.utils.video_processing import list_video_files, prepare_videos
 
 router = APIRouter(prefix="/index", tags=["index"])
 
-IndexPhase = Literal["idle", "scanning", "embeddings", "faces", "clustering", "thumbnails", "writing", "cancelling", "cancelled", "complete"]
+IndexPhase = Literal[
+    "idle",
+    "scanning",
+    "embeddings",
+    "video_keyframes",
+    "faces",
+    "clustering",
+    "thumbnails",
+    "writing",
+    "cancelling",
+    "cancelled",
+    "complete",
+]
 DEFAULT_INDEX_BATCH_SIZE = 32
 SIGLIP2_LARGE_MODEL_ID = "siglip2-large-patch16-384"
 SIGLIP2_LARGE_BATCH_SIZE = 8
@@ -42,6 +76,7 @@ class ModelInfo(BaseModel):
     speed: Literal["fast", "moderate", "slow"]
     diskSize: str
     suitability: str
+    mediaType: Literal["image", "video", "unified"] = "image"
     status: Literal["not_installed", "installed", "active"]
 
 
@@ -52,16 +87,20 @@ class IndexingStatusResponse(BaseModel):
     processed: int
     facesDetected: int
     skipped: int
+    keyframeCount: int = 0
     currentFile: str | None = None
     error: str | None = None
 
 
 class IndexSummaryResponse(BaseModel):
-    activeModel: ModelInfo | None
+    activeImageModel: ModelInfo | None = None
+    activeVideoModel: ModelInfo | None = None
+    activeModel: ModelInfo | None = None
     models: list[ModelInfo]
     indexingStatus: IndexingStatusResponse
     lastIndexedTime: str | None = None
     totalIndexedImages: int = 0
+    totalIndexedVideos: int = 0
     totalPeople: int = 0
     totalFolders: int = 0
     indexedPaths: list[str] = Field(default_factory=list)
@@ -78,6 +117,7 @@ class StartIndexRequest(BaseModel):
 
 class ActivateModelRequest(BaseModel):
     modelId: str
+    mediaType: Literal["image", "video", "unified"] | None = None
 
 
 class DownloadModelRequest(BaseModel):
@@ -109,6 +149,7 @@ MODEL_CATALOG: list[dict[str, Any]] = [
         "speed": "fast",
         "diskSize": "600 MB",
         "suitability": "CPU & GPU",
+        "mediaType": "image",
         "factory": ClipEmbeddingModel,
     },
     {
@@ -119,6 +160,7 @@ MODEL_CATALOG: list[dict[str, Any]] = [
         "speed": "moderate",
         "diskSize": "1.5 GB",
         "suitability": "GPU recommended",
+        "mediaType": "image",
         "factory": SiglipEmbeddingModel,
     },
     {
@@ -129,9 +171,11 @@ MODEL_CATALOG: list[dict[str, Any]] = [
         "speed": "slow",
         "diskSize": "3.3 GB",
         "suitability": "GPU recommended",
+        "mediaType": "image",
         "factory": SiglipLargeEmbeddingModel,
     },
 ]
+_VALID_MODEL_IDS = {entry["id"] for entry in MODEL_CATALOG}
 
 _model_map = {entry["id"]: entry for entry in MODEL_CATALOG}
 _embedding_model_cache: dict[str, BaseEmbeddingModel] = {}
@@ -149,10 +193,12 @@ _index_state: dict[str, Any] = {
     "processed": 0,
     "facesDetected": 0,
     "skipped": 0,
+    "keyframeCount": 0,
     "currentFile": None,
     "error": None,
     "lastIndexedTime": None,
     "totalIndexedImages": 0,
+    "totalIndexedVideos": 0,
     "indexedPaths": [],
 }
 
@@ -165,7 +211,7 @@ def _log_index_api(message: str, **fields: Any) -> None:
     print(f"[{timestamp}] [INDEX API] {message}{suffix}", flush=True)
 
 
-def _load_active_model_id() -> str | None:
+def _load_active_model() -> str | None:
     if not MODEL_STATE_PATH.exists():
         return None
     try:
@@ -173,17 +219,29 @@ def _load_active_model_id() -> str | None:
             payload = json.load(handle)
     except (OSError, json.JSONDecodeError):
         return None
-    active_model_id = payload.get("active_model_id")
-    return active_model_id if isinstance(active_model_id, str) and active_model_id in _model_map else None
+
+    raw = payload.get("active_model_id")
+
+    # Migration from triple-slot JSON
+    if not isinstance(raw, str) or raw not in _VALID_MODEL_IDS:
+        raw_image = payload.get("active_image_model_id")
+        raw_video = payload.get("active_video_model_id")
+        for candidate in (raw_image, raw_video):
+            if isinstance(candidate, str) and candidate in _VALID_MODEL_IDS:
+                raw = candidate
+                break
+        else:
+            return None
+    return raw
 
 
-def _save_active_model_id(active_model_id: str | None) -> None:
+def _save_active_model(model_id: str | None) -> None:
     MODEL_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with MODEL_STATE_PATH.open("w", encoding="utf-8") as handle:
-        json.dump({"active_model_id": active_model_id}, handle, indent=2)
+        json.dump({"active_model_id": model_id}, handle, indent=2)
 
 
-_active_model_id = _load_active_model_id()
+_active_model_id = _load_active_model()
 
 
 def get_model_catalog() -> list[dict[str, Any]]:
@@ -201,18 +259,28 @@ def _default_batch_size_for_model(model_id: str | None) -> int:
 
 
 def get_embedding_model(model_id: str | None = None) -> BaseEmbeddingModel:
-    resolved_model_id = model_id or _active_model_id
+    resolved_model_id = model_id or get_active_model_id()
+    if not resolved_model_id:
+        raise ValueError("No active model selected")
     model_entry = _model_map.get(resolved_model_id)
     if model_entry is None:
         raise ValueError(f"Unsupported model_id: {resolved_model_id}")
     cached = _embedding_model_cache.get(resolved_model_id)
     if cached is not None:
-        _log_index_api("Reusing cached embedding model", model_id=resolved_model_id, model_type=type(cached).__name__)
+        _log_index_api(
+            "Reusing cached embedding model",
+            model_id=resolved_model_id,
+            model_type=type(cached).__name__,
+        )
         return cached
     factory = model_entry["factory"]
     instance = factory()
     _embedding_model_cache[resolved_model_id] = instance
-    _log_index_api("Created embedding model instance", model_id=resolved_model_id, model_type=type(instance).__name__)
+    _log_index_api(
+        "Created embedding model instance",
+        model_id=resolved_model_id,
+        model_type=type(instance).__name__,
+    )
     return instance
 
 
@@ -274,7 +342,9 @@ def _model_cache_size_bytes(model: BaseEmbeddingModel) -> int:
     return total
 
 
-def _progress_from_bytes(downloaded_bytes: int, total_bytes: int, *, complete: bool = False) -> int:
+def _progress_from_bytes(
+    downloaded_bytes: int, total_bytes: int, *, complete: bool = False
+) -> int:
     if complete:
         return 100
     if total_bytes <= 0:
@@ -304,28 +374,50 @@ def _get_download_progress(model_id: str) -> dict[str, Any] | None:
 
 
 def _warm_active_model(model_id: str) -> None:
-    _log_index_api("Warming active model", model_id=model_id, cached_model_ids=list(_embedding_model_cache.keys()))
+    _log_index_api(
+        "Warming active model",
+        model_id=model_id,
+        cached_model_ids=list(_embedding_model_cache.keys()),
+    )
     for cached_model_id, model in list(_embedding_model_cache.items()):
         if cached_model_id != model_id:
-            _log_index_api("Unloading cached model", cached_model_id=cached_model_id, model_type=type(model).__name__)
+            _log_index_api(
+                "Unloading cached model",
+                cached_model_id=cached_model_id,
+                model_type=type(model).__name__,
+            )
             model.unload_model()
             del _embedding_model_cache[cached_model_id]
 
     model = get_embedding_model(model_id)
     model.load_model()
-    _log_index_api("Active model warmed successfully", model_id=model_id, model_type=type(model).__name__)
+    _log_index_api(
+        "Active model warmed successfully",
+        model_id=model_id,
+        model_type=type(model).__name__,
+    )
 
 
 def get_active_model_info() -> dict[str, Any] | None:
     _ensure_active_model_is_available()
+    if _active_model_id is None:
+        return None
     model_entry = _model_map.get(_active_model_id)
     if model_entry is None:
         return None
-    return _model_to_response(model_entry, active=True)
+    return _model_to_response(
+        model_entry, active=True, media_type=model_entry.get("mediaType", "image")
+    )
 
 
-def _model_to_response(model_entry: dict[str, Any], *, active: bool) -> dict[str, Any]:
+def _model_to_response(
+    model_entry: dict[str, Any],
+    *,
+    active: bool,
+    media_type: str | None = None,
+) -> dict[str, Any]:
     is_downloaded = _is_model_downloaded(model_entry["id"])
+    resolved_media = media_type or model_entry.get("mediaType", "image")
     return {
         "id": model_entry["id"],
         "name": model_entry["name"],
@@ -334,28 +426,23 @@ def _model_to_response(model_entry: dict[str, Any], *, active: bool) -> dict[str
         "speed": model_entry["speed"],
         "diskSize": model_entry["diskSize"],
         "suitability": model_entry["suitability"],
-        "status": "active" if active and is_downloaded else ("installed" if is_downloaded else "not_installed"),
+        "mediaType": resolved_media,
+        "status": "active"
+        if active and is_downloaded
+        else ("installed" if is_downloaded else "not_installed"),
     }
 
 
 def _ensure_active_model_is_available() -> None:
     global _active_model_id
-
-    if _active_model_id is None:
-        return
-
-    model_entry = _model_map.get(_active_model_id)
-    if model_entry is None:
-        _active_model_id = None
-        _save_active_model_id(None)
-        return
-
-    if not _is_model_downloaded(_active_model_id):
-        _active_model_id = None
-        _save_active_model_id(None)
+    if _active_model_id is not None:
+        entry = _model_map.get(_active_model_id)
+        if entry is None or not _is_model_downloaded(_active_model_id):
+            _active_model_id = None
+            _save_active_model(None)
 
 
-def _load_meta_data(vs_path: str) -> dict[str, Any]:
+def _load_meta_data(vs_path: str | Path) -> dict[str, Any]:
     meta_path = Path(vs_path) / "meta_data.json"
     if not meta_path.exists():
         return {}
@@ -367,9 +454,13 @@ def _load_meta_data(vs_path: str) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def _count_store_records(vs_path: str) -> int:
+def _count_store_records(vs_path: str | Path) -> int:
     meta_data = _load_meta_data(vs_path)
     return sum(1 for key in meta_data if not str(key).startswith("_"))
+
+
+def _image_store_path_for_model(model_id: str | None) -> Path:
+    return model_scoped_vs_path(model_id, "image") if model_id else IMAGE_VS_PATH
 
 
 def _copy_state() -> dict[str, Any]:
@@ -388,8 +479,18 @@ def _is_cancel_requested() -> bool:
 
 def _reset_vector_stores() -> None:
     reset_image_vector_store()
+    from backend.core.models.vision_language.unified_store import (
+        reset_unified_vector_store,
+    )
+
+    reset_unified_vector_store()
     reset_face_vector_stores()
+    if _active_model_id:
+        delete_vs(str(model_scoped_vs_path(_active_model_id, "unified")))
+        delete_vs(str(model_scoped_vs_path(_active_model_id, "image")))
+        delete_vs(str(model_scoped_vs_path(_active_model_id, "video")))
     delete_vs(IMAGE_VS_PATH)
+    delete_vs(VIDEO_VS_PATH)
     delete_vs(FACE_VS_PATH)
     delete_vs(PERSON_VS_PATH)
 
@@ -421,7 +522,12 @@ def _coarse_phase(processed: int, total: int) -> IndexPhase:
 
 
 def _save_partial_index_state() -> None:
+    from backend.core.models.vision_language.unified_store import (
+        save_unified_vector_store,
+    )
+
     save_image_vector_store()
+    save_unified_vector_store()
     save_face_vector_stores()
 
 
@@ -459,39 +565,57 @@ def _finish_cancelled_index_job(
         skipped=skipped_count,
         currentFile=current_file,
         error=None,
-        totalIndexedImages=_count_store_records(IMAGE_VS_PATH),
+        totalIndexedImages=_count_store_records(
+            _image_store_path_for_model(_active_model_id)
+        ),
     )
 
 
-def _upsert_folder_records(folder_paths: list[Path], *, session: Session) -> dict[str, Folder]:
+def _upsert_folder_records(
+    folder_paths: list[Path], *, session: Session
+) -> dict[str, Folder]:
     existing_by_key: dict[str, Folder] = {}
     for folder in session.exec(select(Folder)).all():
         key = canonicalize_path_key(folder.path)
         existing = existing_by_key.get(key)
         folder.path = canonicalize_path(folder.path)
-        if existing is None or _folder_score(folder) > _folder_score(existing):
+        if existing is None:
             existing_by_key[key] = folder
-    existing: dict[str, Folder] = {}
+        elif _folder_score(folder) > _folder_score(existing):
+            existing_by_key[key] = folder
+    result: dict[str, Folder] = {}
 
     for folder_path in folder_paths:
         key = canonicalize_path_key(folder_path)
-        if key in existing:
+        if key in result:
             continue
         matched = existing_by_key.get(key)
         if matched is None:
-            folder = Folder(path=canonicalize_path(folder_path), image_count=0, status="ready", include_subfolders=True)
+            folder = Folder(
+                path=canonicalize_path(folder_path),
+                image_count=0,
+                status="ready",
+                include_subfolders=True,
+            )
             session.add(folder)
             session.flush()
             matched = folder
         else:
             matched.path = canonicalize_path(matched.path)
-        existing[key] = matched
+        result[key] = matched
 
     session.commit()
-    return existing
+    return result
 
 
-def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, recursive: bool, reset_index: bool) -> None:
+def _run_index_job(
+    folder_paths: list[Path],
+    *,
+    model_id: str,
+    batch_size: int,
+    recursive: bool,
+    reset_index: bool,
+) -> None:
     global _indexing_thread
 
     total_files = 0
@@ -514,8 +638,19 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
             _reset_vector_stores()
 
         image_model = get_embedding_model(model_id)
-        _log_index_api("Resolved image model for index job", model_id=model_id, model_type=type(image_model).__name__)
+        if not image_model.is_model_downloaded():
+            raise RuntimeError(
+                f"Model '{model_id}' is not downloaded. "
+                "Download it from Settings > Models first."
+            )
+        image_model.load_model()
+        _log_index_api(
+            "Resolved image model for index job",
+            model_id=model_id,
+            model_type=type(image_model).__name__,
+        )
         discovered_batches: list[tuple[Path, list[Path]]] = []
+        video_batches: list[tuple[Path, list[Path]]] = []
 
         for folder_path in folder_paths:
             if _is_cancel_requested():
@@ -530,9 +665,17 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
 
             current_file = str(folder_path)
             files = list_image_files(folder_path, recursive=recursive)
+            vfiles = list_video_files(folder_path, recursive=recursive)
             discovered_batches.append((folder_path, files))
-            total_files += len(files)
-            _log_index_api("Discovered files for folder", folder_path=str(folder_path), file_count=len(files))
+            if vfiles:
+                video_batches.append((folder_path, vfiles))
+            total_files += len(files) + len(vfiles)
+            _log_index_api(
+                "Discovered files for folder",
+                folder_path=str(folder_path),
+                image_count=len(files),
+                video_count=len(vfiles),
+            )
 
         _set_state(
             phase="scanning",
@@ -556,13 +699,19 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
             )
             return
 
-        folder_counts = {canonicalize_path_key(folder_path): len(files) for folder_path, files in discovered_batches}
+        folder_counts = {
+            canonicalize_path_key(folder_path): len(files)
+            for folder_path, files in discovered_batches
+        }
 
-        from backend.db_models.database import Session as DBSession, engine
+        from backend.db_models.database import Session as DBSession
+        from backend.db_models.database import engine
 
         with DBSession(engine) as session:
             folder_records = _upsert_folder_records(folder_paths, session=session)
-            _log_index_api("Folder records upserted", folder_record_count=len(folder_records))
+            _log_index_api(
+                "Folder records upserted", folder_record_count=len(folder_records)
+            )
             for folder_path in folder_paths:
                 folder_record = folder_records[canonicalize_path_key(folder_path)]
                 folder_record.status = "scanning"
@@ -582,7 +731,11 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
                     )
                     return
 
-                _log_index_api("Starting folder indexing", folder_path=str(folder_path), file_count=len(files))
+                _log_index_api(
+                    "Starting folder indexing",
+                    folder_path=str(folder_path),
+                    file_count=len(files),
+                )
                 if not files:
                     folder_record = folder_records[canonicalize_path_key(folder_path)]
                     folder_record.image_count = 0
@@ -606,7 +759,9 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
                         return
 
                     batch_paths = files[batch_start : batch_start + batch_size]
-                    current_file = str(batch_paths[0]) if batch_paths else str(folder_path)
+                    current_file = (
+                        str(batch_paths[0]) if batch_paths else str(folder_path)
+                    )
                     _log_index_api(
                         "Starting batch",
                         folder_path=str(folder_path),
@@ -620,11 +775,20 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
                         batch_size=batch_size,
                         save_after_batch=False,
                         cancel_check=_is_cancel_requested,
+                        model_id=model_id,
                     )
                     processed_count += int(batch_stats.get("processed_count", 0))
                     skipped_count += int(batch_stats.get("failed_count", 0))
-                    faces_detected += int(batch_stats.get("face_indexing", {}).get("detected_face_count", 0))
-                    progress = int(round((processed_count / total_files) * 100)) if total_files else 100
+                    faces_detected += int(
+                        batch_stats.get("face_indexing", {}).get(
+                            "detected_face_count", 0
+                        )
+                    )
+                    progress = (
+                        int(round((processed_count / total_files) * 100))
+                        if total_files
+                        else 100
+                    )
                     _log_index_api(
                         "Finished batch",
                         folder_path=str(folder_path),
@@ -633,8 +797,12 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
                         processed_count=processed_count,
                         skipped_count=skipped_count,
                         faces_detected=faces_detected,
-                        image_indexed_count=batch_stats.get("image_indexing", {}).get("indexed_count"),
-                        face_indexed_count=batch_stats.get("face_indexing", {}).get("indexed_face_count"),
+                        image_indexed_count=batch_stats.get("image_indexing", {}).get(
+                            "indexed_count"
+                        ),
+                        face_indexed_count=batch_stats.get("face_indexing", {}).get(
+                            "indexed_face_count"
+                        ),
                     )
 
                     _set_state(
@@ -660,12 +828,140 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
                         return
 
                 folder_record = folder_records[canonicalize_path_key(folder_path)]
-                folder_record.image_count = folder_counts[canonicalize_path_key(folder_path)]
+                folder_record.image_count = folder_counts[
+                    canonicalize_path_key(folder_path)
+                ]
                 folder_record.last_scan_time = datetime.utcnow()
                 folder_record.status = "ready"
                 session.add(folder_record)
                 session.commit()
-                _log_index_api("Folder indexing finished", folder_path=str(folder_path), image_count=folder_record.image_count)
+                _log_index_api(
+                    "Folder indexing finished",
+                    folder_path=str(folder_path),
+                    image_count=folder_record.image_count,
+                )
+
+        if _is_cancel_requested():
+            _finish_cancelled_index_job(
+                total_files=total_files,
+                processed_count=processed_count,
+                faces_detected=faces_detected,
+                skipped_count=skipped_count,
+                current_file=current_file,
+            )
+            return
+
+        # --- Video indexing pass ---
+        if video_batches:
+            _log_index_api(
+                "Starting video indexing pass", folder_count=len(video_batches)
+            )
+            video_processed = 0
+            video_skipped = 0
+            for folder_path, vfiles in video_batches:
+                if _is_cancel_requested():
+                    _finish_cancelled_index_job(
+                        total_files=total_files,
+                        processed_count=processed_count,
+                        faces_detected=faces_detected,
+                        skipped_count=skipped_count,
+                        current_file=current_file,
+                    )
+                    return
+
+                current_file = str(vfiles[0]) if vfiles else str(folder_path)
+                for batch_start in range(0, len(vfiles), batch_size):
+                    if _is_cancel_requested():
+                        _finish_cancelled_index_job(
+                            total_files=total_files,
+                            processed_count=processed_count,
+                            faces_detected=faces_detected,
+                            skipped_count=skipped_count,
+                            current_file=current_file,
+                        )
+                        return
+
+                    batch_paths = vfiles[batch_start : batch_start + batch_size]
+                    valid_paths, failed_items, path_2_duration, path_2_created_at = (
+                        prepare_videos(batch_paths)
+                    )
+                    video_skipped += len(failed_items)
+
+                    from backend.core.indexing.index import (
+                        _dedupe_unindexed_video_paths,
+                    )
+
+                    (
+                        valid_paths,
+                        path_2_created_at,
+                        path_2_duration,
+                        skipped_existing,
+                    ) = _dedupe_unindexed_video_paths(
+                        valid_paths,
+                        path_2_created_at,
+                        path_2_duration,
+                        model_id=model_id,
+                    )
+                    video_skipped += len(skipped_existing)
+
+                    if not valid_paths:
+                        continue
+
+                    _set_state(
+                        phase="video_keyframes",
+                        progress=int(round((processed_count / total_files) * 100))
+                        if total_files
+                        else 0,
+                        total=total_files,
+                        processed=processed_count,
+                        facesDetected=faces_detected,
+                        skipped=skipped_count,
+                        keyframeCount=0,
+                        currentFile=str(valid_paths[0]),
+                    )
+
+                    video_stats = index_video_batch(
+                        image_model,
+                        valid_paths,
+                        path_2_created_at=path_2_created_at,
+                        path_2_duration=path_2_duration,
+                        model_id=model_id,
+                    )
+                    video_keyframes = video_stats.get("indexed_count", 0)
+                    video_processed += len(valid_paths)
+                    processed_count += len(valid_paths)
+                    skipped_count += video_stats.get("failed_count", 0)
+                    total_keyframes = (
+                        _index_state.get("keyframeCount", 0) + video_keyframes
+                    )
+
+                    progress = (
+                        int(round((processed_count / total_files) * 100))
+                        if total_files
+                        else 100
+                    )
+                    _set_state(
+                        phase="video_keyframes" if video_batches else "embeddings",
+                        progress=progress,
+                        total=total_files,
+                        processed=processed_count,
+                        facesDetected=faces_detected,
+                        skipped=skipped_count,
+                        keyframeCount=total_keyframes,
+                        currentFile=current_file,
+                    )
+                    _log_index_api(
+                        "Video batch finished",
+                        folder_path=str(folder_path),
+                        batch_start=batch_start,
+                        indexed=video_stats.get("indexed_count"),
+                    )
+
+            _log_index_api(
+                "Video indexing pass completed",
+                processed=video_processed,
+                skipped=video_skipped,
+            )
 
         if _is_cancel_requested():
             _finish_cancelled_index_job(
@@ -687,7 +983,9 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
             currentFile=None,
         )
         _log_index_api("Finalizing face clusters")
-        final_face_merge_stats = finalize_face_clusters(cancel_check=_is_cancel_requested)
+        final_face_merge_stats = finalize_face_clusters(
+            cancel_check=_is_cancel_requested
+        )
         if _is_cancel_requested() or final_face_merge_stats.get("cancelled"):
             _finish_cancelled_index_job(
                 total_files=total_files,
@@ -712,7 +1010,10 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
             currentFile=None,
             error=None,
             lastIndexedTime=completed_at,
-            totalIndexedImages=_count_store_records(IMAGE_VS_PATH),
+            totalIndexedImages=_count_store_records(
+                _image_store_path_for_model(model_id)
+            ),
+            totalIndexedVideos=_count_store_records(VIDEO_VS_PATH),
             mergedPeople=int(final_face_merge_stats.get("merged_person_count", 0)),
         )
         _log_index_api(
@@ -724,7 +1025,9 @@ def _run_index_job(folder_paths: list[Path], *, model_id: str, batch_size: int, 
             merged_people=final_face_merge_stats.get("merged_person_count", 0),
         )
     except Exception as exc:
-        _log_index_api("Index job crashed", error=str(exc), traceback=traceback.format_exc())
+        _log_index_api(
+            "Index job crashed", error=str(exc), traceback=traceback.format_exc()
+        )
         _set_state(
             phase="idle",
             currentFile=None,
@@ -739,7 +1042,9 @@ def _resolve_folder_paths(payload: StartIndexRequest, session: Session) -> list[
     folder_paths = [Path(canonicalize_path(path)) for path in payload.folderPaths]
 
     if payload.folderIds:
-        folders = session.exec(select(Folder).where(Folder.id.in_(payload.folderIds))).all()
+        folders = session.exec(
+            select(Folder).where(Folder.id.in_(payload.folderIds))
+        ).all()
         folder_paths.extend(Path(canonicalize_path(folder.path)) for folder in folders)
 
     if not folder_paths:
@@ -756,13 +1061,15 @@ def _resolve_folder_paths(payload: StartIndexRequest, session: Session) -> list[
     return unique_paths
 
 
-def _dedupe_folders_for_summary(folders: list[Folder]) -> list[Folder]:
+def _dedupe_folders_for_summary(folders: Sequence[Folder]) -> list[Folder]:
     best_by_key: dict[str, Folder] = {}
     for folder in folders:
         key = canonicalize_path_key(folder.path)
         existing = best_by_key.get(key)
         folder.path = canonicalize_path(folder.path)
-        if existing is None or _folder_score(folder) > _folder_score(existing):
+        if existing is None:
+            best_by_key[key] = folder
+        elif _folder_score(folder) > _folder_score(existing):
             best_by_key[key] = folder
     return list(best_by_key.values())
 
@@ -770,10 +1077,19 @@ def _dedupe_folders_for_summary(folders: list[Folder]) -> list[Folder]:
 @router.get("/models", response_model=list[ModelInfo])
 def read_models() -> list[dict[str, Any]]:
     _ensure_active_model_is_available()
-    return [_model_to_response(model_entry, active=model_entry["id"] == _active_model_id) for model_entry in MODEL_CATALOG]
+    return [
+        _model_to_response(
+            model_entry,
+            active=model_entry["id"] == _active_model_id,
+            media_type=model_entry.get("mediaType", "image"),
+        )
+        for model_entry in MODEL_CATALOG
+    ]
 
 
-@router.get("/models/download-status/{model_id}", response_model=ModelDownloadStatusResponse)
+@router.get(
+    "/models/download-status/{model_id}", response_model=ModelDownloadStatusResponse
+)
 def read_model_download_status(model_id: str) -> dict[str, Any]:
     model_entry = _model_map.get(model_id)
     if model_entry is None:
@@ -840,7 +1156,9 @@ def read_model_download_status(model_id: str) -> dict[str, Any]:
     if status["status"] == "downloading":
         model = get_embedding_model(model_id)
         downloaded_bytes = _model_cache_size_bytes(model)
-        total_bytes = int(status.get("totalBytes") or _parse_size_bytes(model_entry["diskSize"]))
+        total_bytes = int(
+            status.get("totalBytes") or _parse_size_bytes(model_entry["diskSize"])
+        )
         progress = _progress_from_bytes(downloaded_bytes, total_bytes)
         _set_download_progress(
             model_id,
@@ -865,9 +1183,11 @@ def activate_model(payload: ActivateModelRequest) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail="Model is not downloaded")
 
     _active_model_id = payload.modelId
-    _save_active_model_id(_active_model_id)
+    _save_active_model(_active_model_id)
     _warm_active_model(payload.modelId)
-    return _model_to_response(model_entry, active=True)
+    return _model_to_response(
+        model_entry, active=True, media_type=model_entry.get("mediaType", "image")
+    )
 
 
 @router.post("/models/download", response_model=ModelInfo)
@@ -898,7 +1218,9 @@ def download_model(payload: DownloadModelRequest) -> dict[str, Any]:
             totalBytes=total_bytes,
             error=str(exc),
         )
-        raise HTTPException(status_code=500, detail=f"Model download failed: {exc}") from exc
+        raise HTTPException(
+            status_code=500, detail=f"Model download failed: {exc}"
+        ) from exc
 
     _set_model_downloaded(payload.modelId, True)
     downloaded_bytes = max(_model_cache_size_bytes(model), total_bytes)
@@ -910,7 +1232,11 @@ def download_model(payload: DownloadModelRequest) -> dict[str, Any]:
         totalBytes=total_bytes,
         error=None,
     )
-    return _model_to_response(model_entry, active=model_entry["id"] == _active_model_id)
+    return _model_to_response(
+        model_entry,
+        active=model_entry["id"] == _active_model_id,
+        media_type=model_entry.get("mediaType", "image"),
+    )
 
 
 @router.delete("/models/{model_id}")
@@ -924,8 +1250,14 @@ def delete_model(model_id: str) -> dict[str, str]:
     if not _is_model_downloaded(model_id):
         raise HTTPException(status_code=409, detail="Model is not downloaded")
 
-    if model_id == _active_model_id and (_indexing_starting or (_indexing_thread is not None and _indexing_thread.is_alive())):
-        raise HTTPException(status_code=409, detail="Cannot delete the active model while indexing is running")
+    if model_id == _active_model_id and (
+        _indexing_starting
+        or (_indexing_thread is not None and _indexing_thread.is_alive())
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete the active model while indexing is running",
+        )
 
     cached_model = _embedding_model_cache.pop(model_id, None)
     model = cached_model or model_entry["factory"]()
@@ -933,7 +1265,7 @@ def delete_model(model_id: str) -> dict[str, str]:
 
     if model_id == _active_model_id:
         _active_model_id = None
-        _save_active_model_id(None)
+        _save_active_model(None)
 
     _set_model_downloaded(model_id, False)
     _clear_download_progress(model_id)
@@ -951,6 +1283,7 @@ def read_index_status() -> dict[str, Any]:
         "processed": state["processed"],
         "facesDetected": state["facesDetected"],
         "skipped": state["skipped"],
+        "keyframeCount": state.get("keyframeCount", 0),
         "currentFile": state["currentFile"],
         "error": state["error"],
     }
@@ -958,7 +1291,9 @@ def read_index_status() -> dict[str, Any]:
 
 @router.post("/cancel", response_model=IndexingStatusResponse)
 def cancel_indexing() -> dict[str, Any]:
-    if _indexing_starting or (_indexing_thread is not None and _indexing_thread.is_alive()):
+    if _indexing_starting or (
+        _indexing_thread is not None and _indexing_thread.is_alive()
+    ):
         _cancel_index_event.set()
         _set_state(phase="cancelling", currentFile=None, error=None)
         _log_index_api("Index cancellation requested")
@@ -976,11 +1311,25 @@ def read_index_summary(session: Session = Depends(get_session)) -> dict[str, Any
     folders = _dedupe_folders_for_summary(session.exec(select(Folder)).all())
     last_indexed_time = state["lastIndexedTime"]
     if last_indexed_time is None:
-        scan_times = [folder.last_scan_time.isoformat() for folder in folders if folder.last_scan_time is not None]
+        scan_times = [
+            folder.last_scan_time.isoformat()
+            for folder in folders
+            if folder.last_scan_time is not None
+        ]
         last_indexed_time = max(scan_times) if scan_times else None
+
     return {
+        "activeImageModel": None,
+        "activeVideoModel": None,
         "activeModel": get_active_model_info(),
-        "models": [_model_to_response(model_entry, active=model_entry["id"] == _active_model_id) for model_entry in MODEL_CATALOG],
+        "models": [
+            _model_to_response(
+                model_entry,
+                active=model_entry["id"] == _active_model_id,
+                media_type=model_entry.get("mediaType", "image"),
+            )
+            for model_entry in MODEL_CATALOG
+        ],
         "indexingStatus": {
             "phase": state["phase"],
             "progress": state["progress"],
@@ -992,7 +1341,10 @@ def read_index_summary(session: Session = Depends(get_session)) -> dict[str, Any
             "error": state["error"],
         },
         "lastIndexedTime": last_indexed_time,
-        "totalIndexedImages": _count_store_records(IMAGE_VS_PATH),
+        "totalIndexedImages": _count_store_records(
+            _image_store_path_for_model(_active_model_id)
+        ),
+        "totalIndexedVideos": _count_store_records(VIDEO_VS_PATH),
         "totalPeople": _count_store_records(PERSON_VS_PATH),
         "totalFolders": len(folders),
         "indexedPaths": [folder.path for folder in folders],
@@ -1000,12 +1352,16 @@ def read_index_summary(session: Session = Depends(get_session)) -> dict[str, Any
 
 
 @router.post("/start", response_model=IndexSummaryResponse)
-def start_indexing(payload: StartIndexRequest, session: Session = Depends(get_session)) -> dict[str, Any]:
+def start_indexing(
+    payload: StartIndexRequest, session: Session = Depends(get_session)
+) -> dict[str, Any]:
     global _indexing_thread
     global _indexing_starting
     global _active_model_id
 
-    if _indexing_starting or (_indexing_thread is not None and _indexing_thread.is_alive()):
+    if _indexing_starting or (
+        _indexing_thread is not None and _indexing_thread.is_alive()
+    ):
         raise HTTPException(status_code=409, detail="Indexing is already running")
     _cancel_index_event.clear()
     _indexing_starting = True
@@ -1026,7 +1382,10 @@ def start_indexing(payload: StartIndexRequest, session: Session = Depends(get_se
 
         missing_paths = [str(path) for path in folder_paths if not path.exists()]
         if missing_paths:
-            raise HTTPException(status_code=400, detail={"message": "Some folders do not exist", "paths": missing_paths})
+            raise HTTPException(
+                status_code=400,
+                detail={"message": "Some folders do not exist", "paths": missing_paths},
+            )
 
         _set_state(
             phase="scanning",
@@ -1046,20 +1405,28 @@ def start_indexing(payload: StartIndexRequest, session: Session = Depends(get_se
             if not _is_model_downloaded(payload.modelId):
                 raise HTTPException(status_code=409, detail="Model is not downloaded")
             _active_model_id = payload.modelId
-            _save_active_model_id(_active_model_id)
+            _save_active_model(_active_model_id)
             _warm_active_model(payload.modelId)
-        elif _active_model_id is None:
-            raise HTTPException(status_code=400, detail="Select a model before indexing")
+        elif get_active_model_id() is None:
+            raise HTTPException(
+                status_code=400, detail="Select a model before indexing"
+            )
+
+        active_model_id = get_active_model_id()
 
         if _is_cancel_requested():
             _set_state(phase="cancelled", currentFile=None, error=None)
             _indexing_starting = False
             return read_index_summary(session=session)
 
-        resolved_batch_size = payload.batchSize if payload.batchSize is not None else _default_batch_size_for_model(_active_model_id)
+        resolved_batch_size = (
+            payload.batchSize
+            if payload.batchSize is not None
+            else _default_batch_size_for_model(active_model_id)
+        )
         _log_index_api(
             "Resolved indexing configuration",
-            active_model_id=_active_model_id,
+            active_model_id=active_model_id,
             resolved_batch_size=resolved_batch_size,
             folder_paths=[str(path) for path in folder_paths],
         )
@@ -1068,7 +1435,7 @@ def start_indexing(payload: StartIndexRequest, session: Session = Depends(get_se
             target=_run_index_job,
             kwargs={
                 "folder_paths": folder_paths,
-                "model_id": _active_model_id,
+                "model_id": active_model_id,
                 "batch_size": resolved_batch_size,
                 "recursive": payload.recursive,
                 "reset_index": payload.resetIndex,
@@ -1077,7 +1444,9 @@ def start_indexing(payload: StartIndexRequest, session: Session = Depends(get_se
         )
         _indexing_starting = False
         _indexing_thread.start()
-        _log_index_api("Background index thread started", thread_name=_indexing_thread.name)
+        _log_index_api(
+            "Background index thread started", thread_name=_indexing_thread.name
+        )
         return read_index_summary(session=session)
     except Exception:
         _indexing_starting = False
@@ -1085,7 +1454,9 @@ def start_indexing(payload: StartIndexRequest, session: Session = Depends(get_se
 
 
 @router.post("/reindex", response_model=IndexSummaryResponse)
-def reindex(payload: StartIndexRequest, session: Session = Depends(get_session)) -> dict[str, Any]:
+def reindex(
+    payload: StartIndexRequest, session: Session = Depends(get_session)
+) -> dict[str, Any]:
     payload.resetIndex = True
     return start_indexing(payload=payload, session=session)
 
@@ -1094,7 +1465,10 @@ def reindex(payload: StartIndexRequest, session: Session = Depends(get_session))
 def read_storage_summary() -> dict[str, Any]:
     return {
         "indexPath": str(DATA_DIR.resolve()),
-        "indexSizeBytes": _directory_size_bytes(IMAGE_VS_PATH) + _directory_size_bytes(FACE_VS_PATH) + _directory_size_bytes(PERSON_VS_PATH),
+        "indexSizeBytes": _directory_size_bytes(IMAGE_VS_PATH)
+        + _directory_size_bytes(VIDEO_VS_PATH)
+        + _directory_size_bytes(FACE_VS_PATH)
+        + _directory_size_bytes(PERSON_VS_PATH),
         "thumbnailCachePath": str(THUMBNAIL_CACHE_DIR.resolve()),
         "thumbnailCacheBytes": _directory_size_bytes(THUMBNAIL_CACHE_DIR),
     }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme } from "@/contexts/useTheme";
 import { Download, Check, Loader2, AlertTriangle, HardDrive, FolderOpen, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,9 +8,10 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { toast } from "@/components/ui/sonner";
-import { useApp } from "@/contexts/AppContext";
+import { toast } from "sonner";
+import { useApp } from "@/contexts/useApp";
 import { clearCache, getStorageSummary, type StorageSummary } from "@/lib/api";
+import type { ModelInfo } from "@/types/app";
 
 const tabs = ["General", "Models", "Storage", "Indexing", "Interface"];
 
@@ -81,7 +82,7 @@ function ModelsSettings() {
   const [switchDialog, setSwitchDialog] = useState<string | null>(null);
 
   const handleSwitch = (id: string) => {
-    if (activeModel && (folders.length > 0 || totalIndexedImages > 0)) {
+    if (activeModel && activeModel.id !== id && (folders.length > 0 || totalIndexedImages > 0)) {
       setSwitchDialog(id);
     } else {
       void setActiveModel(id);
@@ -99,65 +100,16 @@ function ModelsSettings() {
     <div className="space-y-6">
       <h2 className="text-base font-medium text-foreground">Models</h2>
 
-      {activeModel && (
-        <div className="bg-accent border border-border rounded-xl p-4">
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Active Model</p>
-          <p className="text-sm font-medium text-foreground">{activeModel.name}</p>
-          <p className="text-xs text-muted-foreground">{activeModel.description}</p>
-        </div>
-      )}
-
-      <div className="space-y-3">
-        {models.map(model => (
-          <div key={model.id} className={`border rounded-xl p-4 transition-colors ${model.status === "active" ? "border-primary bg-accent" : "border-border bg-card"}`}>
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="font-medium text-sm text-foreground">{model.name}</h3>
-                  {model.status === "active" && <Badge className="bg-primary text-primary-foreground text-[10px]">Active</Badge>}
-                </div>
-                <p className="text-xs text-muted-foreground">{model.description}</p>
-                <div className="flex items-center gap-3 text-[10px] text-muted-foreground mt-1">
-                  <span>{model.diskSize}</span>
-                  <span>•</span>
-                  <span>{model.quality} quality</span>
-                  <span>•</span>
-                  <span>{model.speed} speed</span>
-                </div>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                {model.status === "not_installed" && (
-                  <Button size="sm" variant="outline" className="text-xs h-8" onClick={() => void downloadModel(model.id)} disabled={isWorking}>
-                    <Download className="w-3 h-3 mr-1.5" /> Download
-                  </Button>
-                )}
-                {model.status === "downloading" && (
-                  <Button size="sm" variant="outline" className="text-xs h-8" disabled>
-                    <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> {model.downloadProgress}%
-                  </Button>
-                )}
-                {model.status === "installed" && (
-                  <Button size="sm" className="text-xs h-8" onClick={() => handleSwitch(model.id)} disabled={isWorking}>
-                    <Check className="w-3 h-3 mr-1.5" /> {activeModel ? "Switch & rebuild" : "Use"}
-                  </Button>
-                )}
-                {(model.status === "installed" || model.status === "active") && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="text-xs h-8 text-destructive hover:text-destructive"
-                    onClick={() => void removeModel(model.id)}
-                    disabled={isWorking}
-                  >
-                    <Trash2 className="w-3 h-3 mr-1.5" /> Delete
-                  </Button>
-                )}
-              </div>
-            </div>
-            {model.status === "downloading" && <Progress value={model.downloadProgress} className="mt-3 h-1.5" />}
-          </div>
-        ))}
-      </div>
+      <ModelGroup
+        title="Primary model"
+        description="Powers both natural-language image search and video search."
+        active={activeModel}
+        models={models}
+        onSwitch={handleSwitch}
+        onDownload={(id) => void downloadModel(id)}
+        onRemove={(id) => void removeModel(id)}
+        isWorking={isWorking}
+      />
 
       <Dialog open={!!switchDialog} onOpenChange={(open) => {
         if (!open && !isWorking) {
@@ -183,6 +135,97 @@ function ModelsSettings() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function ModelGroup({
+  title,
+  description,
+  active,
+  models,
+  onSwitch,
+  onDownload,
+  onRemove,
+  isWorking,
+}: {
+  title: string;
+  description: string;
+  active: ModelInfo | null;
+  models: ModelInfo[];
+  onSwitch: (id: string) => void;
+  onDownload: (id: string) => void;
+  onRemove: (id: string) => void;
+  isWorking: boolean;
+}) {
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{title}</p>
+        <p className="text-xs text-muted-foreground/80">{description}</p>
+      </div>
+
+      {active && (
+        <div className="bg-accent border border-border rounded-xl p-3">
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Active</p>
+          <p className="text-sm font-medium text-foreground">{active.name}</p>
+          <p className="text-xs text-muted-foreground">{active.description}</p>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {models.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic">No models available for this category.</p>
+        ) : models.map((model) => (
+          <div key={model.id} className={`border rounded-xl p-4 transition-colors ${model.status === "active" ? "border-primary bg-accent" : "border-border bg-card"}`}>
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="font-medium text-sm text-foreground">{model.name}</h3>
+                  {model.status === "active" && <Badge className="bg-primary text-primary-foreground text-[10px]">Active</Badge>}
+                </div>
+                <p className="text-xs text-muted-foreground">{model.description}</p>
+                <div className="flex items-center gap-3 text-[10px] text-muted-foreground mt-1">
+                  <span>{model.diskSize}</span>
+                  <span>•</span>
+                  <span>{model.quality} quality</span>
+                  <span>•</span>
+                  <span>{model.speed} speed</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {model.status === "not_installed" && (
+                  <Button size="sm" variant="outline" className="text-xs h-8" onClick={() => onDownload(model.id)} disabled={isWorking}>
+                    <Download className="w-3 h-3 mr-1.5" /> Download
+                  </Button>
+                )}
+                {model.status === "downloading" && (
+                  <Button size="sm" variant="outline" className="text-xs h-8" disabled>
+                    <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> {model.downloadProgress}%
+                  </Button>
+                )}
+                {model.status === "installed" && (
+                    <Button size="sm" className="text-xs h-8" onClick={() => onSwitch(model.id)} disabled={isWorking}>
+                      <Check className="w-3 h-3 mr-1.5" /> {active ? "Switch & rebuild" : "Use"}
+                    </Button>
+                )}
+                {(model.status === "installed" || model.status === "active") && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs h-8 text-destructive hover:text-destructive"
+                    onClick={() => onRemove(model.id)}
+                    disabled={isWorking}
+                  >
+                    <Trash2 className="w-3 h-3 mr-1.5" /> Delete
+                  </Button>
+                )}
+              </div>
+            </div>
+            {model.status === "downloading" && <Progress value={model.downloadProgress} className="mt-3 h-1.5" />}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { Heart } from "lucide-react";
-import { useApp } from "@/contexts/AppContext";
+import { useApp } from "@/contexts/useApp";
 import { ResultsGrid } from "@/components/search/ResultsGrid";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";

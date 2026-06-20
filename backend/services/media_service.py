@@ -5,10 +5,12 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+import av
 from PIL import Image
 
 from backend.config import THUMBNAIL_CACHE_DIR
 from backend.utils.path_utils import canonicalize_path
+from backend.utils.video_processing import extract_thumbnail_frame
 
 
 DEFAULT_THUMBNAIL_SIZE = 512
@@ -73,6 +75,41 @@ def ensure_thumbnail(image_path: str | Path, *, size: int = DEFAULT_THUMBNAIL_SI
         image.thumbnail((size, size))
         image.save(thumbnail_path, format="JPEG", quality=85, optimize=True)
 
+    return thumbnail_path
+
+
+def get_video_dimensions(video_path: str | Path) -> tuple[int | None, int | None]:
+    """Returns the width and height of a video's first stream."""
+    try:
+        with av.open(str(video_path)) as container:
+            stream = container.streams.video[0]
+            return int(stream.width), int(stream.height)
+    except Exception:
+        return None, None
+
+
+def ensure_video_thumbnail(video_path: str | Path, *, size: int = DEFAULT_THUMBNAIL_SIZE) -> Path:
+    """Generates or retrieves a cached thumbnail for a video (mid-point frame)."""
+    source_path = Path(canonicalize_path(video_path))
+    if not source_path.exists() or not source_path.is_file():
+        raise FileNotFoundError(f"Video file is missing: {source_path}")
+
+    THUMBNAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    stats = source_path.stat()
+    cache_key = hashlib.sha1(f"{source_path}|{stats.st_mtime_ns}|{size}|video".encode("utf-8")).hexdigest()
+    thumbnail_path = THUMBNAIL_CACHE_DIR / f"{cache_key}.jpg"
+    if thumbnail_path.exists():
+        return thumbnail_path
+
+    frame_bytes = extract_thumbnail_frame(source_path)
+    if frame_bytes is None:
+        raise ValueError(f"Could not extract thumbnail frame from video: {source_path}")
+
+    import io
+    from PIL import Image as PILImage
+    image = PILImage.open(io.BytesIO(frame_bytes))
+    image.thumbnail((size, size))
+    image.save(thumbnail_path, format="JPEG", quality=85, optimize=True)
     return thumbnail_path
 
 

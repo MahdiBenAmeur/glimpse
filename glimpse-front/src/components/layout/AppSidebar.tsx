@@ -1,6 +1,6 @@
 import { Search, Users, Heart, FolderOpen, Bookmark, Database, Settings, ChevronLeft } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
-import { useApp } from "@/contexts/AppContext";
+import { useApp } from "@/contexts/useApp";
 import {
   Sidebar,
   SidebarContent,
@@ -10,25 +10,34 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarFooter,
-  useSidebar,
 } from "@/components/ui/sidebar";
+import { useSidebar } from "@/hooks/useSidebar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 const navItems = [
   { title: "Search", url: "/search", icon: Search },
-  { title: "People", url: "/people", icon: Users },
-  { title: "Favorites", url: "/favorites", icon: Heart },
-  { title: "Collections", url: "/collections", icon: FolderOpen },
-  { title: "Saved Searches", url: "/saved-searches", icon: Bookmark },
+  { title: "People", url: "/people", icon: Users, countKey: "people" },
+  { title: "Favorites", url: "/favorites", icon: Heart, countKey: "favorites" },
+  { title: "Collections", url: "/collections", icon: FolderOpen, countKey: "collections" },
+  { title: "Saved Searches", url: "/saved-searches", icon: Bookmark, countKey: "savedSearches" },
   { title: "Index", url: "/index-manager", icon: Database },
   { title: "Settings", url: "/settings", icon: Settings },
-];
+] as const;
+
+type CountKey = "people" | "favorites" | "collections" | "savedSearches";
 
 export function AppSidebar() {
   const { state, toggleSidebar } = useSidebar();
   const collapsed = state === "collapsed";
-  const { activeModel, indexingStatus, lastIndexedTime } = useApp();
+  const { activeModel, indexingStatus, lastIndexedTime, people, favorites, collections, savedSearches } = useApp();
+
+  const counts: Record<CountKey, number> = {
+    people: people.length,
+    favorites: favorites.length,
+    collections: collections.length,
+    savedSearches: savedSearches.length,
+  };
 
   const indexFresh = lastIndexedTime
     ? (Date.now() - new Date(lastIndexedTime).getTime()) < 86400000
@@ -67,6 +76,11 @@ export function AppSidebar() {
                     >
                       <item.icon className={`w-4 h-4${collapsed ? "" : " mr-2"}`} />
                       {!collapsed && <span>{item.title}</span>}
+                      {!collapsed && "countKey" in item && counts[item.countKey] > 0 && (
+                        <span className="ml-auto text-[10px] text-muted-foreground tabular-nums">
+                          {counts[item.countKey]}
+                        </span>
+                      )}
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -80,11 +94,9 @@ export function AppSidebar() {
         {!collapsed && (
           <>
             {activeModel && (
-              <div className="flex items-center gap-1.5">
-                <Badge variant="secondary" className="text-[10px] font-normal truncate">
-                  {activeModel.name}
-                </Badge>
-              </div>
+              <Badge variant="secondary" className="text-[10px] font-normal truncate w-full">
+                {activeModel.name}
+              </Badge>
             )}
             <div className="flex items-center gap-1.5">
               <div className={`w-1.5 h-1.5 rounded-full ${isIndexing ? "bg-warning animate-pulse" : indexFresh ? "bg-success" : "bg-muted-foreground"}`} />

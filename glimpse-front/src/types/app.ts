@@ -6,6 +6,7 @@ export interface ModelInfo {
   speed: "fast" | "moderate" | "slow";
   diskSize: string;
   suitability: string;
+  mediaType: "image" | "video" | "unified";
   status: "not_installed" | "downloading" | "installed" | "active";
   downloadProgress?: number;
 }
@@ -36,6 +37,25 @@ export interface PersonInfo {
   faceUrl: string;
   imageCount: number;
   lastSeen?: string;
+}
+
+export interface VideoResult {
+  id: string;
+  videoId: number;
+  url: string;
+  thumbnailUrl?: string;
+  path?: string;
+  filename: string;
+  folder: string;
+  dateTaken: string | null;
+  width: number | null;
+  height: number | null;
+  duration: number | null;
+  score?: number;
+  mediaType: "video";
+  timestamp?: number;
+  keyframeIndex?: number;
+  totalKeyframes?: number;
 }
 
 export interface ImageResult {
